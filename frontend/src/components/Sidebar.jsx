@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -18,11 +18,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-interface SidebarProps {
-  activeRoute?: string;
-}
-
-export const Sidebar: React.FC<SidebarProps> = ({ activeRoute = 'dashboard' }) => {
+export const Sidebar = ({ activeRoute = 'dashboard' }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { id: 'resume-analyzer', label: 'Resume Analyzer', icon: FileText, href: '/resume-analyzer' },
@@ -65,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeRoute = 'dashboard' }) =
           return (
             <Link
               key={item.id}
-              href={item.href}
+              to={item.href}
               className={`flex items-center gap-3.5 px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ${
                 isActive
                   ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25 font-semibold'

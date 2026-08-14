@@ -1,19 +1,16 @@
-'use client';
-
 import React, { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { Link, useNavigate } from 'react-router-dom';
 import { Sparkles, Mail, Lock, User as UserIcon, ArrowRight, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 export default function SignupPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -32,8 +29,8 @@ export default function SignupPage() {
 
       localStorage.setItem('prepnest_token', data.access_token);
       localStorage.setItem('prepnest_user', JSON.stringify(data.user));
-      router.push('/dashboard');
-    } catch (err: any) {
+      navigate('/dashboard');
+    } catch (err) {
       setError(err.message || 'Registration failed');
     } finally {
       setLoading(false);
@@ -171,7 +168,7 @@ export default function SignupPage() {
 
           <div className="mt-6 text-center text-xs text-slate-400">
             Already have an account?{' '}
-            <Link href="/login" className="text-indigo-400 font-bold hover:underline">
+            <Link to="/login" className="text-indigo-400 font-bold hover:underline">
               Sign In
             </Link>
           </div>

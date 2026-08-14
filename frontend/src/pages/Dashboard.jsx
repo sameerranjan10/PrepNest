@@ -1,6 +1,5 @@
-'use client';
-
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 import { mockUser, mockDSAProblems, mockCompanies } from '@/lib/mockData';
@@ -101,7 +100,7 @@ export default function DashboardPage() {
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-indigo-400" /> Recommended DSA Challenges
                   </h3>
-                  <a href="/dsa" className="text-xs font-semibold text-indigo-400 hover:text-indigo-300">View All Directory →</a>
+                  <Link to="/dsa" className="text-xs font-semibold text-indigo-400 hover:text-indigo-300">View All Directory →</Link>
                 </div>
 
                 <div className="space-y-3">

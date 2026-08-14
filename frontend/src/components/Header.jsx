@@ -2,7 +2,7 @@ import React from 'react';
 import { Bell, Search, Flame, Zap } from 'lucide-react';
 import { mockUser } from '@/lib/mockData';
 
-export const Header: React.FC = () => {
+export const Header = () => {
   return (
     <header className="h-16 border-b border-slate-800 bg-slate-900/60 backdrop-blur-xl px-8 flex items-center justify-between sticky top-0 z-30">
       {/* Global Search Bar */}
