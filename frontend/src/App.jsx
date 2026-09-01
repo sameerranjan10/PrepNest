@@ -10,6 +10,7 @@ import AIAssistantPage from './pages/AIAssistant';
 import CompanyPrepPage from './pages/CompanyPrep';
 import MockInterviewPage from './pages/MockInterview';
 import ResumeAnalyzerPage from './pages/ResumeAnalyzer';
+import RoadmapsPage from "./pages/Roadmaps";
 
 export default function App() {
   return (
