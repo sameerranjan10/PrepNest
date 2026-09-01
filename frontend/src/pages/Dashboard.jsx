@@ -2,10 +2,33 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
-import { mockUser, mockDSAProblems, mockCompanies } from '@/lib/mockData';
-import { Sparkles, Trophy, CheckCircle2, ArrowUpRight, Flame, Target } from 'lucide-react';
+import { mockDSAProblems, mockCompanies } from '@/lib/mockData';
+import { 
+  Sparkles, 
+  Trophy, 
+  CheckCircle2, 
+  ArrowUpRight, 
+  Flame, 
+  Target, 
+  Shield, 
+  Mail, 
+  BrainCircuit, 
+  ArrowRight,
+  Map,
+  Video,
+  FileText,
+  Bot,
+  Code2,
+  BookOpen
+} from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
+  const { user } = useAuth();
+
+  const displayName = user?.full_name || user?.name || 'Student';
+  const readiness = 78; // Baseline placement readiness calculation
+
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100 font-sans">
       <Sidebar activeRoute="dashboard" />
@@ -15,27 +38,37 @@ export default function DashboardPage() {
         <main className="p-8 space-y-8 overflow-y-auto">
           {/* Welcome Banner */}
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-900/60 via-purple-900/40 to-slate-900 border border-slate-800 p-8">
-            <div className="relative z-10 flex items-center justify-between">
+            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
               <div className="space-y-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  <Sparkles className="w-3.5 h-3.5" /> AI Placement Assistant
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <Sparkles className="w-3.5 h-3.5" /> AI Placement Assistant
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <Shield className="w-3 h-3" /> {user?.plan || 'Pro'} Active
+                  </span>
+                </div>
                 <h1 className="text-3xl font-extrabold text-white">
-                  Welcome back, {mockUser.name} 👋
+                  Welcome back, {displayName} 👋
                 </h1>
                 <p className="text-sm text-slate-300 max-w-xl">
-                  You are <strong className="text-indigo-400 font-bold">{mockUser.placementReadiness}% Placement Ready</strong> for upcoming campus drives. Keep building your DSA & interview streak!
+                  You are <strong className="text-indigo-400 font-bold">{readiness}% Placement Ready</strong> for upcoming campus drives. You have <strong className="text-white font-bold">{user?.credits ?? 250} AI Credits</strong> remaining.
                 </p>
+                {user?.email && (
+                  <p className="text-xs text-slate-400 flex items-center gap-1.5 pt-1">
+                    <Mail className="w-3.5 h-3.5 text-slate-500" /> {user.email}
+                  </p>
+                )}
               </div>
 
               {/* Placement Radar Progress */}
-              <div className="flex items-center gap-6 bg-slate-900/80 backdrop-blur-md p-5 rounded-xl border border-slate-800">
-                <div className="relative w-20 h-20 flex items-center justify-center">
+              <div className="flex items-center gap-6 bg-slate-900/80 backdrop-blur-md p-5 rounded-xl border border-slate-800 self-start lg:self-auto">
+                <div className="relative w-20 h-20 flex items-center justify-center flex-shrink-0">
                   <svg className="w-full h-full transform -rotate-90">
                     <circle cx="40" cy="40" r="34" stroke="currentColor" strokeWidth="6" className="text-slate-800" fill="transparent" />
-                    <circle cx="40" cy="40" r="34" stroke="currentColor" strokeWidth="6" className="text-indigo-500" strokeDasharray="213.6" strokeDashoffset={213.6 * (1 - mockUser.placementReadiness / 100)} strokeLinecap="round" fill="transparent" />
+                    <circle cx="40" cy="40" r="34" stroke="currentColor" strokeWidth="6" className="text-indigo-500" strokeDasharray="213.6" strokeDashoffset={213.6 * (1 - readiness / 100)} strokeLinecap="round" fill="transparent" />
                   </svg>
-                  <span className="absolute font-extrabold text-lg text-white">{mockUser.placementReadiness}%</span>
+                  <span className="absolute font-extrabold text-lg text-white">{readiness}%</span>
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Target Level</h4>
@@ -75,7 +108,7 @@ export default function DashboardPage() {
                 <Flame className="w-6 h-6" />
               </div>
               <div>
-                <div className="text-2xl font-bold text-white">{mockUser.streakDays} Days</div>
+                <div className="text-2xl font-bold text-white">14 Days</div>
                 <div className="text-xs text-slate-400">Daily Coding Streak</div>
               </div>
             </div>
@@ -88,6 +121,84 @@ export default function DashboardPage() {
                 <div className="text-2xl font-bold text-white">90%</div>
                 <div className="text-xs text-slate-400">Mock Interview Score</div>
               </div>
+            </div>
+          </div>
+
+          {/* Placement Modules Quick Hub */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Aptitude Launcher Card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-950 border border-slate-800 hover:border-indigo-500/40 backdrop-blur-xl transition flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+                    <BrainCircuit className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Live Tests
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white">Campus Aptitude Hub</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Practice Quantitative, Logical Reasoning & Verbal Ability with countdown timers and step-by-step explanations.
+                </p>
+              </div>
+              <Link
+                to="/aptitude"
+                className="w-full py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
+              >
+                <span>Launch Practice Hub</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* Roadmaps Launcher Card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-purple-950/70 via-slate-900 to-slate-950 border border-slate-800 hover:border-purple-500/40 backdrop-blur-xl transition flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+                    <Map className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    10 Tracks
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white">Curated SDE Roadmaps</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Interactive step-by-step learning paths for Frontend, Backend, Fullstack, AI Engineer, and Campus SDE.
+                </p>
+              </div>
+              <Link
+                to="/roadmaps"
+                className="w-full py-2.5 rounded-xl bg-purple-600/80 hover:bg-purple-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
+              >
+                <span>Explore Roadmaps</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* AI Mock Interview Launcher Card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-cyan-950/70 via-slate-900 to-slate-950 border border-slate-800 hover:border-cyan-500/40 backdrop-blur-xl transition flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center">
+                    <Video className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Voice & Video
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white">AI Mock Interviewer</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Simulate live technical and HR interviews with speech recognition, AI scoring, and instant performance metrics.
+                </p>
+              </div>
+              <Link
+                to="/mock-interview"
+                className="w-full py-2.5 rounded-xl bg-cyan-600/80 hover:bg-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
+              >
+                <span>Start Mock Session</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
           </div>
 

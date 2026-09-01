@@ -6,6 +6,8 @@ import {
   Navigate,
 } from "react-router-dom";
 
+import { AuthProvider } from "./context/AuthContext";
+
 import LandingPage from "./pages/Landing";
 import LoginPage from "./pages/Login";
 import SignupPage from "./pages/Signup";
@@ -15,81 +17,90 @@ import AIAssistantPage from "./pages/AIAssistant";
 import CompanyPrepPage from "./pages/CompanyPrep";
 import MockInterviewPage from "./pages/MockInterview";
 import ResumeAnalyzerPage from "./pages/ResumeAnalyzer";
+import AptitudePage from "./pages/Aptitude";
 import RoadmapsPage from "./pages/Roadmaps";
 import LeaderboardPage from "./pages/Leaderboard";
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
+    <AuthProvider>
+      <Router>
+        <Routes>
 
-        <Route
-          path="/"
-          element={<Navigate to="/landing" replace />}
-        />
+          <Route
+            path="/"
+            element={<Navigate to="/landing" replace />}
+          />
 
-        <Route
-          path="/landing"
-          element={<LandingPage />}
-        />
+          <Route
+            path="/landing"
+            element={<LandingPage />}
+          />
 
-        <Route
-          path="/login"
-          element={<LoginPage />}
-        />
+          <Route
+            path="/login"
+            element={<LoginPage />}
+          />
 
-        <Route
-          path="/signup"
-          element={<SignupPage />}
-        />
+          <Route
+            path="/signup"
+            element={<SignupPage />}
+          />
 
-        <Route
-          path="/dashboard"
-          element={<DashboardPage />}
-        />
+          <Route
+            path="/dashboard"
+            element={<DashboardPage />}
+          />
 
-        <Route
-          path="/dsa"
-          element={<DSAPage />}
-        />
+          <Route
+            path="/aptitude"
+            element={<AptitudePage />}
+          />
 
-        <Route
-          path="/ai-assistant"
-          element={<AIAssistantPage />}
-        />
+          <Route
+            path="/roadmaps"
+            element={<RoadmapsPage />}
+          />
 
-        <Route
-          path="/company-prep"
-          element={<CompanyPrepPage />}
-        />
+          <Route
+            path="/dsa"
+            element={<DSAPage />}
+          />
 
-        <Route
-          path="/mock-interview"
-          element={<MockInterviewPage />}
-        />
+          <Route
+            path="/ai-assistant"
+            element={<AIAssistantPage />}
+          />
 
-        <Route
-          path="/resume-analyzer"
-          element={<ResumeAnalyzerPage />}
-        />
+          <Route
+            path="/company-prep"
+            element={<CompanyPrepPage />}
+          />
 
-        <Route
-          path="/roadmaps"
-          element={<RoadmapsPage />}
-        />
+          <Route
+            path="/mock-interview"
+            element={<MockInterviewPage />}
+          />
 
-        <Route
-          path="/leaderboard"
-          element={<LeaderboardPage />}
-        />
+          <Route
+            path="/resume-analyzer"
+            element={<ResumeAnalyzerPage />}
+          />
 
-        {/* Keep fallback LAST */}
-        <Route
-          path="*"
-          element={<Navigate to="/dashboard" replace />}
-        />
+          {/* Your Leaderboard */}
+          <Route
+            path="/leaderboard"
+            element={<LeaderboardPage />}
+          />
 
-      </Routes>
-    </Router>
+          {/* Fallback - keep this LAST */}
+          <Route
+            path="*"
+            element={<Navigate to="/dashboard" replace />}
+          />
+
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }

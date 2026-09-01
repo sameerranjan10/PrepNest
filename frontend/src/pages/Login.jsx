@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, ShieldCheck, CheckCircle2, Flame } from 'lucide-react';
+import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, CheckCircle2, Flame } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,7 +20,7 @@ export default function LoginPage() {
       const res = await fetch('http://localhost:8000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: email.trim(), password })
       });
 
       const data = await res.json();
@@ -26,8 +28,7 @@ export default function LoginPage() {
         throw new Error(data.detail || 'Invalid email or password');
       }
 
-      localStorage.setItem('prepnest_token', data.access_token);
-      localStorage.setItem('prepnest_user', JSON.stringify(data.user));
+      login(data.user, data.access_token);
       navigate('/dashboard');
     } catch (err) {
       setError(err.message || 'Authentication failed. Make sure FastAPI server is running.');
@@ -137,7 +138,7 @@ export default function LoginPage() {
             <button 
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4"
+              className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer"
             >
               {loading ? 'Authenticating with FastAPI...' : 'Sign In to Workspace'} <ArrowRight className="w-4 h-4" />
             </button>
