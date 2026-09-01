@@ -58,6 +58,44 @@ class TokenResponse(BaseModel):
     user: dict
 
 
+class UserProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    bio: Optional[str] = None
+    location: Optional[str] = None
+    avatar_url: Optional[str] = None
+    target_role: Optional[str] = None
+    target_companies: Optional[str] = None
+    skills: Optional[str] = None
+    college: Optional[str] = None
+    degree: Optional[str] = None
+    grad_year: Optional[int] = None
+    current_semester: Optional[str] = None
+    cgpa: Optional[str] = None
+    tenth_percentage: Optional[str] = None
+    twelfth_percentage: Optional[str] = None
+    leetcode_username: Optional[str] = None
+    hackerrank_username: Optional[str] = None
+    codechef_username: Optional[str] = None
+    codeforces_username: Optional[str] = None
+    gfg_username: Optional[str] = None
+    github_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    portfolio_url: Optional[str] = None
+    resume_url: Optional[str] = None
+    preferred_language: Optional[str] = None
+    daily_dsa_goal: Optional[int] = None
+    daily_aptitude_goal: Optional[int] = None
+    prep_level: Optional[str] = None
+    email_notifications: Optional[bool] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+
 # -------------------------------------------------------------
 # Aptitude Request Models
 # -------------------------------------------------------------
@@ -219,10 +257,7 @@ def login_user(user_data: UserLogin):
 
 # -------------------------------------------------------------
 
-@app.get("/api/auth/me")
-def get_current_user(
-    authorization: Optional[str] = Header(None)
-):
+def get_current_user_from_token(authorization: Optional[str]):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=401,
@@ -239,14 +274,20 @@ def get_current_user(
         )
 
     email = payload.get("sub")
-
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
         cursor.execute(
             """
-            SELECT id, email, full_name, plan, credits, created_at
+            SELECT id, email, full_name, plan, credits, phone, bio, location, 
+                   avatar_url, target_role, target_companies, skills, college, 
+                   degree, grad_year, current_semester, cgpa, tenth_percentage, 
+                   twelfth_percentage, leetcode_username, hackerrank_username, 
+                   codechef_username, codeforces_username, gfg_username, 
+                   github_url, linkedin_url, portfolio_url, resume_url, 
+                   preferred_language, daily_dsa_goal, daily_aptitude_goal, 
+                   prep_level, email_notifications, created_at
             FROM users
             WHERE email = %s
             """,
@@ -264,13 +305,127 @@ def get_current_user(
         )
 
     user_dict = dict(row)
-
     if user_dict.get("created_at"):
-        user_dict["created_at"] = str(
-            user_dict["created_at"]
-        )
+        user_dict["created_at"] = str(user_dict["created_at"])
 
     return user_dict
+
+
+@app.get("/api/auth/me")
+def get_current_user(
+    authorization: Optional[str] = Header(None)
+):
+    return get_current_user_from_token(authorization)
+
+
+@app.get("/api/user/profile")
+def get_user_profile(
+    authorization: Optional[str] = Header(None)
+):
+    return get_current_user_from_token(authorization)
+
+
+@app.put("/api/user/profile")
+def update_user_profile(
+    profile_data: UserProfileUpdate,
+    authorization: Optional[str] = Header(None)
+):
+    current_user = get_current_user_from_token(authorization)
+    user_id = current_user["id"]
+
+    update_fields = []
+    values = []
+
+    # Map fields dynamically from model
+    data_dict = profile_data.dict(exclude_unset=True)
+    if not data_dict:
+        return current_user
+
+    for field, val in data_dict.items():
+        update_fields.append(f"{field} = %s")
+        values.append(val)
+
+    values.append(user_id)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        set_clause = ", ".join(update_fields)
+        query = f"""
+            UPDATE users
+            SET {set_clause}
+            WHERE id = %s
+            RETURNING id, email, full_name, plan, credits, phone, bio, location, 
+                      avatar_url, target_role, target_companies, skills, college, 
+                      degree, grad_year, current_semester, cgpa, tenth_percentage, 
+                      twelfth_percentage, leetcode_username, hackerrank_username, 
+                      codechef_username, codeforces_username, gfg_username, 
+                      github_url, linkedin_url, portfolio_url, resume_url, 
+                      preferred_language, daily_dsa_goal, daily_aptitude_goal, 
+                      prep_level, email_notifications, created_at
+        """
+        cursor.execute(query, tuple(values))
+        updated_row = cursor.fetchone()
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update profile: {str(e)}"
+        )
+    finally:
+        cursor.close()
+        conn.close()
+
+    updated_user = dict(updated_row)
+    if updated_user.get("created_at"):
+        updated_user["created_at"] = str(updated_user["created_at"])
+
+    return updated_user
+
+
+@app.put("/api/user/password")
+def change_user_password(
+    pass_data: PasswordChangeRequest,
+    authorization: Optional[str] = Header(None)
+):
+    current_user = get_current_user_from_token(authorization)
+    user_id = current_user["id"]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "SELECT hashed_password FROM users WHERE id = %s",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        if not row or not verify_password(pass_data.current_password, row["hashed_password"]):
+            raise HTTPException(
+                status_code=400,
+                detail="Current password is incorrect"
+            )
+
+        if len(pass_data.new_password) < 6:
+            raise HTTPException(
+                status_code=400,
+                detail="New password must be at least 6 characters long"
+            )
+
+        new_hashed = hash_password(pass_data.new_password)
+        cursor.execute(
+            "UPDATE users SET hashed_password = %s WHERE id = %s",
+            (new_hashed, user_id)
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"status": "ok", "message": "Password updated successfully"}
+
 
 
 # =============================================================

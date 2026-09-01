@@ -20,6 +20,7 @@ import ResumeAnalyzerPage from "./pages/ResumeAnalyzer";
 import AptitudePage from "./pages/Aptitude";
 import RoadmapsPage from "./pages/Roadmaps";
 import LeaderboardPage from "./pages/Leaderboard";
+import SettingsPage from "./pages/Settings";
 import CommunityPage from "./pages/Community";
 
 export default function App() {
@@ -52,6 +53,12 @@ export default function App() {
             path="/dashboard"
             element={<DashboardPage />}
           />
+
+          <Route
+            path="/settings"
+            element={<SettingsPage />}
+          />
+
 
           <Route
             path="/aptitude"

@@ -75,6 +75,67 @@ export const AuthProvider = ({ children }) => {
     });
   };
 
+  const updateProfile = async (profileData) => {
+    const savedToken = localStorage.getItem('prepnest_token') || token;
+    if (savedToken) {
+      try {
+        const res = await fetch('http://localhost:8000/api/user/profile', {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${savedToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(profileData)
+        });
+
+        if (res.ok) {
+          const updatedUser = await res.json();
+          setUser(updatedUser);
+          localStorage.setItem('prepnest_user', JSON.stringify(updatedUser));
+          return { success: true, user: updatedUser };
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Failed to update profile on server');
+        }
+      } catch (err) {
+        console.warn('Backend update failed, saving locally:', err.message);
+        // Fallback to local update
+        updateUser(profileData);
+        return { success: true, user: { ...user, ...profileData }, warning: err.message };
+      }
+    } else {
+      // Guest or local mode
+      updateUser(profileData);
+      return { success: true, user: { ...user, ...profileData } };
+    }
+  };
+
+  const changePassword = async (currentPassword, newPassword) => {
+    const savedToken = localStorage.getItem('prepnest_token') || token;
+    if (!savedToken) {
+      throw new Error('You must be logged in to change your password');
+    }
+
+    const res = await fetch('http://localhost:8000/api/user/password', {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${savedToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword
+      })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Failed to update password');
+    }
+
+    return await res.json();
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -84,12 +145,15 @@ export const AuthProvider = ({ children }) => {
         loading,
         login,
         logout,
-        updateUser
+        updateUser,
+        updateProfile,
+        changePassword
       }}
     >
       {children}
     </AuthContext.Provider>
   );
+
 };
 
 export const useAuth = () => {
