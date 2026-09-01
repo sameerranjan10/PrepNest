@@ -23,18 +23,18 @@
 
 ## 📋 Project Details
 
-> **Minor Project - I (Annexure - 1)**  
+  
 > **Course / Department:** Computer Science and Engineering  
-> **Section:** CSE C | **Group No:** 10  
+
 > **Supervisor:** Dr. Sibo Prasad Patro  
-> **Date:** 04-Aug-2026
+
 
 ### 👥 Team Members
 | Roll No | Registration No | Student Name | Role |
 | :--- | :--- | :--- | :--- |
-| **24CSE003** | `24UG010070` | **Sameer Ranjan Nayak** | Full-Stack & System Architecture |
-| **24CSE024** | `24UG010091` | **D Ritwika** | Frontend & UI/UX Design |
-| **24CSE034** | `24UG010101` | **Gudla Vivek** | Backend & AI Integration |
+| **24CSE003** | `24UG010070` | **Sameer Ranjan Nayak** | Full stack developer |
+| **24CSE024** | `24UG010091` | **D Ritwika** | Backend and system architect|
+| **24CSE034** | `24UG010101` | **Gudla Vivek** | frontend & AI Integration|
 
 ---
 
