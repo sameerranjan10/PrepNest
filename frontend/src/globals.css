@@ -6,3 +6,17 @@ body {
   background-color: #020617;
   color: #f8fafc;
 }
+.input-style {
+  width: 100%;
+  background: rgb(30 41 59);
+  border: 1px solid rgb(51 65 85);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  color: white;
+  outline: none;
+}
+
+.input-style:focus {
+  border-color: rgb(99 102 241);
+}
