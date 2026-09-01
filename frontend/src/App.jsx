@@ -21,6 +21,7 @@ import AptitudePage from "./pages/Aptitude";
 import RoadmapsPage from "./pages/Roadmaps";
 import LeaderboardPage from "./pages/Leaderboard";
 import SettingsPage from "./pages/Settings";
+import CommunityPage from "./pages/Community";
 
 export default function App() {
   return (
@@ -105,6 +106,11 @@ export default function App() {
             path="*"
             element={<Navigate to="/dashboard" replace />}
           />
+          <Route
+  path="/community"
+  element={<CommunityPage />}
+/>
+
 
         </Routes>
       </Router>
