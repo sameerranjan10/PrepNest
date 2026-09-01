@@ -4,9 +4,9 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from database import init_db, get_db_connection
 from auth import hash_password, verify_password, create_access_token, decode_access_token
-import sqlite3
+import psycopg2
 
-app = FastAPI(title="AI Studio SaaS Auth API")
+app = FastAPI(title="PrepNest AI Studio Auth API")
 
 # Enable CORS for React frontend
 app.add_middleware(
@@ -38,7 +38,7 @@ class TokenResponse(BaseModel):
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "service": "AI Studio Auth API"}
+    return {"status": "ok", "service": "PrepNest Auth API with NeonDB"}
 
 @app.post("/api/auth/register", response_model=TokenResponse)
 def register_user(user_data: UserRegister):
@@ -46,26 +46,36 @@ def register_user(user_data: UserRegister):
     cursor = conn.cursor()
     
     # Check if user already exists
-    cursor.execute("SELECT id FROM users WHERE email = ?", (user_data.email.lower(),))
+    cursor.execute("SELECT id FROM users WHERE email = %s", (user_data.email.lower().strip(),))
     if cursor.fetchone():
+        cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="User with this email already exists")
     
     hashed = hash_password(user_data.password)
     try:
         cursor.execute(
-            "INSERT INTO users (email, full_name, hashed_password, plan, credits) VALUES (?, ?, ?, 'Pro', 250)",
-            (user_data.email.lower(), user_data.full_name, hashed)
+            """
+            INSERT INTO users (email, full_name, hashed_password, plan, credits)
+            VALUES (%s, %s, %s, 'Pro', 250)
+            RETURNING id, email, full_name, plan, credits, created_at
+            """,
+            (user_data.email.lower().strip(), user_data.full_name.strip(), hashed)
         )
+        user_row = cursor.fetchone()
         conn.commit()
-        user_id = cursor.lastrowid
-    except sqlite3.Error as e:
+    except Exception as e:
+        conn.rollback()
+        cursor.close()
         conn.close()
-        raise HTTPException(status_code=500, detail="Database insertion failed")
+        raise HTTPException(status_code=500, detail=f"Database insertion failed: {str(e)}")
     
-    cursor.execute("SELECT id, email, full_name, plan, credits, created_at FROM users WHERE id = ?", (user_id,))
-    user = dict(cursor.fetchone())
+    cursor.close()
     conn.close()
+    
+    user = dict(user_row)
+    if "created_at" in user and user["created_at"]:
+        user["created_at"] = str(user["created_at"])
     
     token = create_access_token({"sub": user["email"], "user_id": user["id"]})
     return {"access_token": token, "token_type": "bearer", "user": user}
@@ -75,8 +85,9 @@ def login_user(user_data: UserLogin):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM users WHERE email = ?", (user_data.email.lower(),))
+    cursor.execute("SELECT * FROM users WHERE email = %s", (user_data.email.lower().strip(),))
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if not row or not verify_password(user_data.password, row["hashed_password"]):
@@ -88,7 +99,7 @@ def login_user(user_data: UserLogin):
         "full_name": row["full_name"],
         "plan": row["plan"],
         "credits": row["credits"],
-        "created_at": row["created_at"]
+        "created_at": str(row["created_at"]) if row.get("created_at") else None
     }
     
     token = create_access_token({"sub": user["email"], "user_id": user["id"]})
@@ -107,11 +118,15 @@ def get_current_user(authorization: Optional[str] = Header(None)):
     email = payload.get("sub")
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, email, full_name, plan, credits, created_at FROM users WHERE email = ?", (email,))
+    cursor.execute("SELECT id, email, full_name, plan, credits, created_at FROM users WHERE email = %s", (email,))
     row = cursor.fetchone()
+    cursor.close()
     conn.close()
     
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
         
-    return dict(row)
+    user_dict = dict(row)
+    if "created_at" in user_dict and user_dict["created_at"]:
+        user_dict["created_at"] = str(user_dict["created_at"])
+    return user_dict
