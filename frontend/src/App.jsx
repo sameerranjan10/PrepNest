@@ -10,7 +10,8 @@ import AIAssistantPage from './pages/AIAssistant';
 import CompanyPrepPage from './pages/CompanyPrep';
 import MockInterviewPage from './pages/MockInterview';
 import ResumeAnalyzerPage from './pages/ResumeAnalyzer';
-import RoadmapsPage from "./pages/Roadmaps";
+import AptitudePage from './pages/Aptitude';
+import RoadmapsPage from './pages/Roadmaps';
 
 export default function App() {
   return (
@@ -22,6 +23,8 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/aptitude" element={<AptitudePage />} />
+          <Route path="/roadmaps" element={<RoadmapsPage />} />
           <Route path="/dsa" element={<DSAPage />} />
           <Route path="/ai-assistant" element={<AIAssistantPage />} />
           <Route path="/company-prep" element={<CompanyPrepPage />} />

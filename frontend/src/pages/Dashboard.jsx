@@ -107,6 +107,36 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Aptitude Practice Quick Launcher */}
+          <div className="p-6 rounded-2xl bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-slate-900 border border-slate-800 backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 shrink-0">
+                <BrainCircuit className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">Campus Aptitude & Analytical Practice</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Live Assessment
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Practice Quantitative, Logical Reasoning & Verbal Ability questions with live timers, instant score evaluation, and step-by-step explanations.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+              <Link
+                to="/aptitude"
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition shrink-0"
+              >
+                <span>Launch Aptitude Hub</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+
           {/* Main Content Split: Recommended DSA & Target Companies */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left 2 Columns: Recommended DSA Problems */}
