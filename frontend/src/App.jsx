@@ -10,6 +10,8 @@ import CompanyPrepPage from './pages/CompanyPrep';
 import MockInterviewPage from './pages/MockInterview';
 import ResumeAnalyzerPage from './pages/ResumeAnalyzer';
 import AptitudePage from './pages/Aptitude';
+=======
+import RoadmapsPage from "./pages/Roadmaps";
 
 export default function App() {
   return (
@@ -28,6 +30,10 @@ export default function App() {
         <Route path="/resume-analyzer" element={<ResumeAnalyzerPage />} />
         {/* Fallback for other routes */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route
+  path="/roadmaps"
+  element={<RoadmapsPage />}
+/>
       </Routes>
     </Router>
   );
