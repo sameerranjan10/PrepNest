@@ -3,7 +3,24 @@ import { Link } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 import { mockDSAProblems, mockCompanies } from '@/lib/mockData';
-import { Sparkles, Trophy, CheckCircle2, ArrowUpRight, Flame, Target, Shield, Mail } from 'lucide-react';
+import { 
+  Sparkles, 
+  Trophy, 
+  CheckCircle2, 
+  ArrowUpRight, 
+  Flame, 
+  Target, 
+  Shield, 
+  Mail, 
+  BrainCircuit, 
+  ArrowRight,
+  Map,
+  Video,
+  FileText,
+  Bot,
+  Code2,
+  BookOpen
+} from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 export default function DashboardPage() {
@@ -107,32 +124,80 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Aptitude Practice Quick Launcher */}
-          <div className="p-6 rounded-2xl bg-gradient-to-r from-indigo-950/70 via-purple-950/50 to-slate-900 border border-slate-800 backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 shrink-0">
-                <BrainCircuit className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white">Campus Aptitude & Analytical Practice</h3>
+          {/* Placement Modules Quick Hub */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Aptitude Launcher Card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-950 border border-slate-800 hover:border-indigo-500/40 backdrop-blur-xl transition flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+                    <BrainCircuit className="w-6 h-6" />
+                  </div>
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    Live Assessment
+                    Live Tests
                   </span>
                 </div>
-                <p className="text-xs text-slate-300">
-                  Practice Quantitative, Logical Reasoning & Verbal Ability questions with live timers, instant score evaluation, and step-by-step explanations.
+                <h3 className="text-lg font-bold text-white">Campus Aptitude Hub</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Practice Quantitative, Logical Reasoning & Verbal Ability with countdown timers and step-by-step explanations.
                 </p>
               </div>
-            </div>
-
-            <div className="flex items-center gap-3 w-full md:w-auto justify-end">
               <Link
                 to="/aptitude"
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition shrink-0"
+                className="w-full py-2.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
               >
-                <span>Launch Aptitude Hub</span>
-                <ArrowRight className="w-4 h-4" />
+                <span>Launch Practice Hub</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* Roadmaps Launcher Card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-purple-950/70 via-slate-900 to-slate-950 border border-slate-800 hover:border-purple-500/40 backdrop-blur-xl transition flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+                    <Map className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    10 Tracks
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white">Curated SDE Roadmaps</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Interactive step-by-step learning paths for Frontend, Backend, Fullstack, AI Engineer, and Campus SDE.
+                </p>
+              </div>
+              <Link
+                to="/roadmaps"
+                className="w-full py-2.5 rounded-xl bg-purple-600/80 hover:bg-purple-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
+              >
+                <span>Explore Roadmaps</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* AI Mock Interview Launcher Card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-cyan-950/70 via-slate-900 to-slate-950 border border-slate-800 hover:border-cyan-500/40 backdrop-blur-xl transition flex flex-col justify-between space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="w-11 h-11 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center">
+                    <Video className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Voice & Video
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white">AI Mock Interviewer</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Simulate live technical and HR interviews with speech recognition, AI scoring, and instant performance metrics.
+                </p>
+              </div>
+              <Link
+                to="/mock-interview"
+                className="w-full py-2.5 rounded-xl bg-cyan-600/80 hover:bg-cyan-600 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
+              >
+                <span>Start Mock Session</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
           </div>
