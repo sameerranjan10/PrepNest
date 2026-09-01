@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -14,11 +14,27 @@ import {
   Users, 
   FileCode2, 
   Settings, 
-  User, 
-  ShieldCheck
+  LogOut,
+  Sparkles
 } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export const Sidebar = ({ activeRoute = 'dashboard' }) => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const getInitials = (name) => {
+    if (!name) return 'ST';
+    const parts = name.trim().split(' ').filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, href: '/dashboard' },
     { id: 'resume-analyzer', label: 'Resume Analyzer', icon: FileText, href: '/resume-analyzer' },
@@ -33,7 +49,6 @@ export const Sidebar = ({ activeRoute = 'dashboard' }) => {
     { id: 'community', label: 'Community', icon: Users, href: '/community' },
     { id: 'notes', label: 'Notes', icon: FileCode2, href: '/notes' },
     { id: 'settings', label: 'Settings', icon: Settings, href: '/settings' },
-    { id: 'admin', label: 'Admin Panel', icon: ShieldCheck, href: '/admin' },
   ];
 
   return (
@@ -47,8 +62,8 @@ export const Sidebar = ({ activeRoute = 'dashboard' }) => {
           <h1 className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-200 bg-clip-text text-transparent">
             Prep<span className="text-indigo-400">Nest</span>
           </h1>
-          <span className="text-[10px] font-semibold text-indigo-400/80 tracking-widest uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full">
-            AI SaaS Pro
+          <span className="text-[10px] font-semibold text-indigo-400/80 tracking-widest uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <Sparkles className="w-2.5 h-2.5" /> {user?.plan || 'Pro'} Tier
           </span>
         </div>
       </div>
@@ -75,17 +90,27 @@ export const Sidebar = ({ activeRoute = 'dashboard' }) => {
         })}
       </nav>
 
-      {/* User Footer Card */}
-      <div className="p-4 border-t border-slate-800/60">
-        <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-800/40 border border-slate-700/40">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold text-white text-xs">
-            AJ
+      {/* User Footer Card with dynamic User & Logout */}
+      <div className="p-4 border-t border-slate-800/60 space-y-2">
+        <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center font-bold text-white text-xs shadow-md">
+            {getInitials(user?.full_name || user?.name)}
           </div>
-          <div className="flex-1 overflow-hidden">
-            <h4 className="text-xs font-semibold text-slate-200 truncate">Alex Johnson</h4>
-            <p className="text-[11px] text-slate-400 truncate">Readiness: 86%</p>
+          <div className="flex-1 overflow-hidden min-w-0">
+            <h4 className="text-xs font-bold text-slate-100 truncate">
+              {user?.full_name || user?.name || 'Student Account'}
+            </h4>
+            <p className="text-[10px] text-slate-400 truncate">
+              {user?.email || 'Logged In'}
+            </p>
           </div>
-          <User className="w-4 h-4 text-slate-400 hover:text-white cursor-pointer" />
+          <button 
+            onClick={handleLogout}
+            title="Sign Out"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </aside>
