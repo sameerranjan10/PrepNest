@@ -403,9 +403,75 @@ def init_db():
             hashed_password TEXT NOT NULL,
             plan TEXT DEFAULT 'Pro',
             credits INTEGER DEFAULT 250,
+            phone TEXT,
+            bio TEXT,
+            location TEXT,
+            avatar_url TEXT,
+            target_role TEXT,
+            target_companies TEXT,
+            skills TEXT,
+            college TEXT,
+            degree TEXT,
+            grad_year INTEGER,
+            current_semester TEXT,
+            cgpa TEXT,
+            tenth_percentage TEXT,
+            twelfth_percentage TEXT,
+            leetcode_username TEXT,
+            hackerrank_username TEXT,
+            codechef_username TEXT,
+            codeforces_username TEXT,
+            gfg_username TEXT,
+            github_url TEXT,
+            linkedin_url TEXT,
+            portfolio_url TEXT,
+            resume_url TEXT,
+            preferred_language TEXT DEFAULT 'Python',
+            daily_dsa_goal INTEGER DEFAULT 2,
+            daily_aptitude_goal INTEGER DEFAULT 1,
+            prep_level TEXT DEFAULT 'Intermediate',
+            email_notifications BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
+
+    # Safe column additions if table already existed
+    user_columns = [
+        ("phone", "TEXT"),
+        ("bio", "TEXT"),
+        ("location", "TEXT"),
+        ("avatar_url", "TEXT"),
+        ("target_role", "TEXT"),
+        ("target_companies", "TEXT"),
+        ("skills", "TEXT"),
+        ("college", "TEXT"),
+        ("degree", "TEXT"),
+        ("grad_year", "INTEGER"),
+        ("current_semester", "TEXT"),
+        ("cgpa", "TEXT"),
+        ("tenth_percentage", "TEXT"),
+        ("twelfth_percentage", "TEXT"),
+        ("leetcode_username", "TEXT"),
+        ("hackerrank_username", "TEXT"),
+        ("codechef_username", "TEXT"),
+        ("codeforces_username", "TEXT"),
+        ("gfg_username", "TEXT"),
+        ("github_url", "TEXT"),
+        ("linkedin_url", "TEXT"),
+        ("portfolio_url", "TEXT"),
+        ("resume_url", "TEXT"),
+        ("preferred_language", "TEXT DEFAULT 'Python'"),
+        ("daily_dsa_goal", "INTEGER DEFAULT 2"),
+        ("daily_aptitude_goal", "INTEGER DEFAULT 1"),
+        ("prep_level", "TEXT DEFAULT 'Intermediate'"),
+        ("email_notifications", "BOOLEAN DEFAULT TRUE"),
+    ]
+    for col_name, col_type in user_columns:
+        try:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+        except Exception:
+            pass
+
     
     # 2. Aptitude Questions table
     cursor.execute("""

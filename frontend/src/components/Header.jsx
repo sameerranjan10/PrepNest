@@ -1,5 +1,6 @@
 import React from 'react';
-import { Bell, Search, Flame, Zap, Sparkles, Coins } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Bell, Search, Flame, Zap, Sparkles, Coins, Settings } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 export const Header = () => {
@@ -37,6 +38,15 @@ export const Header = () => {
           <span>Active Streak</span>
         </div>
 
+        {/* Settings Shortcut */}
+        <Link 
+          to="/settings"
+          title="Account Settings & Profile"
+          className="w-9 h-9 rounded-full border border-slate-700/60 bg-slate-800/40 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 transition"
+        >
+          <Settings className="w-4 h-4" />
+        </Link>
+
         {/* Notifications */}
         <button className="w-9 h-9 rounded-full border border-slate-700/60 bg-slate-800/40 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 transition">
           <Bell className="w-4 h-4" />
@@ -45,3 +55,4 @@ export const Header = () => {
     </header>
   );
 };
+
