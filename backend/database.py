@@ -1,6 +1,16 @@
 import os
+import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "database.db")
+# Load environment variables from .env file
+load_dotenv()
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_EXjAufhWdP48@ep-royal-brook-axod04dl-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+)
 
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -400,7 +410,7 @@ def init_db():
     # 2. Aptitude Questions table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS aptitude_questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             category TEXT NOT NULL,
             subtopic TEXT NOT NULL,
             difficulty TEXT NOT NULL,
@@ -411,14 +421,14 @@ def init_db():
             option_d TEXT NOT NULL,
             correct_option TEXT NOT NULL,
             explanation TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
     
     # 3. Aptitude Test Results table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS aptitude_test_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER DEFAULT 1,
             category TEXT NOT NULL,
             total_questions INTEGER NOT NULL,
@@ -428,7 +438,7 @@ def init_db():
             score_percentage REAL NOT NULL,
             time_taken_seconds INTEGER NOT NULL,
             answers_json TEXT NOT NULL,
-            completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
     
@@ -440,7 +450,7 @@ def init_db():
             cursor.execute("""
                 INSERT INTO aptitude_questions 
                 (category, subtopic, difficulty, question_text, option_a, option_b, option_c, option_d, correct_option, explanation)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 q["category"],
                 q["subtopic"],
