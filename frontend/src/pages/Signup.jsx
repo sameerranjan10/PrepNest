@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Sparkles, Mail, Lock, User as UserIcon, ArrowRight, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +21,7 @@ export default function SignupPage() {
       const res = await fetch('http://localhost:8000/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full_name: fullName, email, password })
+        body: JSON.stringify({ full_name: fullName.trim(), email: email.trim(), password })
       });
 
       const data = await res.json();
@@ -27,8 +29,7 @@ export default function SignupPage() {
         throw new Error(data.detail || 'Registration failed');
       }
 
-      localStorage.setItem('prepnest_token', data.access_token);
-      localStorage.setItem('prepnest_user', JSON.stringify(data.user));
+      login(data.user, data.access_token);
       navigate('/dashboard');
     } catch (err) {
       setError(err.message || 'Registration failed');
@@ -87,7 +88,7 @@ export default function SignupPage() {
 
           <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs text-slate-400 flex items-center gap-3">
             <ShieldCheck className="w-5 h-5 text-indigo-400 flex-shrink-0" />
-            <span>FastAPI Backend Security with bcrypt password encryption.</span>
+            <span>FastAPI Backend Security with NeonDB Cloud PostgreSQL.</span>
           </div>
         </div>
 
@@ -160,7 +161,7 @@ export default function SignupPage() {
             <button 
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4"
+              className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer"
             >
               {loading ? 'Creating Account...' : 'Get Started Free'} <ArrowRight className="w-4 h-4" />
             </button>

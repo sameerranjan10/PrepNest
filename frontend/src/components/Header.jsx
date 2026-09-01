@@ -1,8 +1,10 @@
 import React from 'react';
-import { Bell, Search, Flame, Zap } from 'lucide-react';
-import { mockUser } from '@/lib/mockData';
+import { Bell, Search, Flame, Zap, Sparkles, Coins } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export const Header = () => {
+  const { user } = useAuth();
+
   return (
     <header className="h-16 border-b border-slate-800 bg-slate-900/60 backdrop-blur-xl px-8 flex items-center justify-between sticky top-0 z-30">
       {/* Global Search Bar */}
@@ -16,17 +18,23 @@ export const Header = () => {
       </div>
 
       {/* Stats & Quick Actions */}
-      <div className="flex items-center gap-4">
-        {/* Daily Streak Pill */}
-        <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 px-3 py-1 rounded-full text-xs font-semibold">
-          <Flame className="w-4 h-4 fill-amber-500 text-amber-500 animate-pulse" />
-          <span>{mockUser.streakDays} Day Streak</span>
+      <div className="flex items-center gap-3">
+        {/* Credits Pill */}
+        <div className="flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 px-3 py-1 rounded-full text-xs font-semibold">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+          <span>{user?.credits ?? 250} AI Credits</span>
         </div>
 
-        {/* Level XP Pill */}
-        <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-3 py-1 rounded-full text-xs font-semibold">
-          <Zap className="w-4 h-4 text-indigo-400" />
-          <span>Lvl {mockUser.level} ({mockUser.xp} XP)</span>
+        {/* Plan Pill */}
+        <div className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/25 text-purple-300 px-3 py-1 rounded-full text-xs font-semibold">
+          <Zap className="w-3.5 h-3.5 text-purple-400" />
+          <span>{user?.plan || 'Pro'} Plan</span>
+        </div>
+
+        {/* Daily Streak Pill */}
+        <div className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/25 text-amber-400 px-3 py-1 rounded-full text-xs font-semibold">
+          <Flame className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+          <span>Active Streak</span>
         </div>
 
         {/* Notifications */}
