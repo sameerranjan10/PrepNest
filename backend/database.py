@@ -520,6 +520,38 @@ def init_db():
             UNIQUE(user_id, question_id)
         );
     """)
+
+    # 5. DSA Problems Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dsa_problems (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            slug TEXT,
+            difficulty VARCHAR(20) NOT NULL,
+            acceptance_rate REAL DEFAULT 0.0,
+            link TEXT UNIQUE NOT NULL,
+            topics TEXT[] DEFAULT '{}',
+            companies TEXT[] DEFAULT '{}',
+            company_frequencies JSONB DEFAULT '{}'::jsonb,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_dsa_problems_difficulty ON dsa_problems(difficulty);
+    """)
+
+    # 6. User DSA Progress Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_dsa_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            problem_id INTEGER NOT NULL REFERENCES dsa_problems(id) ON DELETE CASCADE,
+            is_solved BOOLEAN DEFAULT FALSE,
+            is_bookmarked BOOLEAN DEFAULT FALSE,
+            solved_at TIMESTAMP WITH TIME ZONE,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, problem_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_dsa_progress_user ON user_dsa_progress(user_id);
+    """)
     
     # Check if questions need seeding
     cursor.execute("SELECT COUNT(*) as count FROM aptitude_questions")

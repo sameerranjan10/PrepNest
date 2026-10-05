@@ -118,6 +118,16 @@ class SingleSolveRequest(BaseModel):
     selected_option: str
 
 
+class DSAToggleSolvedRequest(BaseModel):
+    user_id: Optional[int] = 1
+    problem_id: int
+
+
+class DSAToggleBookmarkRequest(BaseModel):
+    user_id: Optional[int] = 1
+    problem_id: int
+
+
 # -------------------------------------------------------------
 # General Endpoints
 # -------------------------------------------------------------
@@ -1367,4 +1377,273 @@ def solve_single_question(payload: SingleSolveRequest):
         "status": status,
         "xp_earned": 25 if is_correct else 0,
         "explanation": q["explanation"]
+    }
+
+
+# -------------------------------------------------------------
+# DSA Problem Directory Endpoints
+# -------------------------------------------------------------
+
+@app.get("/api/dsa/meta")
+def get_dsa_meta(user_id: Optional[int] = 1):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Total problems
+        cursor.execute("SELECT COUNT(*) AS total FROM dsa_problems")
+        total_problems = cursor.fetchone()["total"]
+
+        # User progress
+        cursor.execute(
+            """
+            SELECT 
+                COUNT(CASE WHEN is_solved = true THEN 1 END) AS solved_count,
+                COUNT(CASE WHEN is_bookmarked = true THEN 1 END) AS bookmarked_count
+            FROM user_dsa_progress 
+            WHERE user_id = %s
+            """,
+            (user_id or 1,)
+        )
+        prog = cursor.fetchone()
+        solved_count = prog["solved_count"] or 0
+        bookmarked_count = prog["bookmarked_count"] or 0
+
+        # Difficulty breakdown
+        cursor.execute(
+            """
+            SELECT difficulty, COUNT(*) AS count 
+            FROM dsa_problems 
+            GROUP BY difficulty
+            """
+        )
+        diff_counts = {r["difficulty"]: r["count"] for r in cursor.fetchall()}
+
+        # Top companies
+        cursor.execute(
+            """
+            SELECT company, COUNT(*) AS count
+            FROM (
+                SELECT unnest(companies) AS company FROM dsa_problems
+            ) sub
+            GROUP BY company
+            ORDER BY count DESC
+            LIMIT 40
+            """
+        )
+        top_companies = [dict(r) for r in cursor.fetchall()]
+
+        # Top topics
+        cursor.execute(
+            """
+            SELECT topic, COUNT(*) AS count
+            FROM (
+                SELECT unnest(topics) AS topic FROM dsa_problems
+            ) sub
+            GROUP BY topic
+            ORDER BY count DESC
+            LIMIT 50
+            """
+        )
+        top_topics = [dict(r) for r in cursor.fetchall()]
+
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {
+        "total_problems": total_problems,
+        "solved_count": solved_count,
+        "bookmarked_count": bookmarked_count,
+        "difficulty_counts": diff_counts,
+        "top_companies": top_companies,
+        "top_topics": top_topics
+    }
+
+
+@app.get("/api/dsa/problems")
+def get_dsa_problems(
+    user_id: Optional[int] = 1,
+    page: int = 1,
+    limit: int = 25,
+    search: Optional[str] = None,
+    difficulty: Optional[str] = "all",
+    company: Optional[str] = "all",
+    topic: Optional[str] = "all",
+    status: Optional[str] = "all",
+    sort_by: Optional[str] = "id"
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    conditions = ["1=1"]
+    params = [user_id or 1]
+
+    if difficulty and difficulty.lower() != "all":
+        conditions.append("LOWER(p.difficulty) = %s")
+        params.append(difficulty.lower())
+
+    if company and company.lower() != "all":
+        conditions.append("EXISTS (SELECT 1 FROM unnest(p.companies) c WHERE LOWER(c) = %s)")
+        params.append(company.lower())
+
+    if topic and topic.lower() != "all":
+        conditions.append("EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE LOWER(t) = %s)")
+        params.append(topic.lower())
+
+    if status == "solved":
+        conditions.append("u.is_solved = true")
+    elif status == "unsolved":
+        conditions.append("(u.is_solved IS NULL OR u.is_solved = false)")
+    elif status == "bookmarked":
+        conditions.append("u.is_bookmarked = true")
+
+    if search and search.strip():
+        s_term = f"%{search.strip().lower()}%"
+        conditions.append("(LOWER(p.title) LIKE %s OR LOWER(p.slug) LIKE %s)")
+        params.append(s_term)
+        params.append(s_term)
+
+    where_clause = " AND ".join(conditions)
+
+    order_by_clause = "p.id ASC"
+    if sort_by == "difficulty":
+        order_by_clause = "CASE p.difficulty WHEN 'Easy' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Hard' THEN 3 ELSE 4 END ASC"
+    elif sort_by == "acceptance":
+        order_by_clause = "p.acceptance_rate DESC"
+    elif sort_by == "title":
+        order_by_clause = "p.title ASC"
+
+    try:
+        count_query = f"""
+            SELECT COUNT(*) AS total
+            FROM dsa_problems p
+            LEFT JOIN user_dsa_progress u ON p.id = u.problem_id AND u.user_id = %s
+            WHERE {where_clause}
+        """
+        cursor.execute(count_query, tuple(params))
+        total_matching = cursor.fetchone()["total"]
+
+        offset = max(0, (page - 1) * limit)
+        data_params = list(params)
+        data_params.extend([limit, offset])
+
+        data_query = f"""
+            SELECT 
+                p.id,
+                p.title,
+                p.slug,
+                p.difficulty,
+                p.acceptance_rate,
+                p.link,
+                p.topics,
+                p.companies,
+                p.company_frequencies,
+                COALESCE(u.is_solved, false) AS is_solved,
+                COALESCE(u.is_bookmarked, false) AS is_bookmarked
+            FROM dsa_problems p
+            LEFT JOIN user_dsa_progress u ON p.id = u.problem_id AND u.user_id = %s
+            WHERE {where_clause}
+            ORDER BY {order_by_clause}
+            LIMIT %s OFFSET %s
+        """
+        cursor.execute(data_query, tuple(data_params))
+        rows = cursor.fetchall()
+
+    finally:
+        cursor.close()
+        conn.close()
+
+    problems = []
+    for r in rows:
+        freq_map = r["company_frequencies"] if isinstance(r["company_frequencies"], dict) else {}
+        freq = 50.0
+        if company and company.lower() != "all":
+            for c_k, c_v in freq_map.items():
+                if c_k.lower() == company.lower():
+                    freq = c_v
+                    break
+        elif freq_map:
+            freq = max(freq_map.values())
+
+        problems.append({
+            "id": r["id"],
+            "title": r["title"],
+            "slug": r["slug"],
+            "difficulty": r["difficulty"],
+            "acceptance_rate": round(r["acceptance_rate"], 1),
+            "link": r["link"],
+            "topics": r["topics"] or [],
+            "companies": r["companies"] or [],
+            "frequency": round(freq, 1),
+            "is_solved": r["is_solved"],
+            "is_bookmarked": r["is_bookmarked"]
+        })
+
+    return {
+        "problems": problems,
+        "total": total_matching,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, (total_matching + limit - 1) // limit)
+    }
+
+
+@app.post("/api/dsa/toggle-solved")
+def toggle_dsa_solved(payload: DSAToggleSolvedRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO user_dsa_progress (user_id, problem_id, is_solved, solved_at, updated_at)
+            VALUES (%s, %s, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, problem_id)
+            DO UPDATE SET 
+                is_solved = NOT user_dsa_progress.is_solved,
+                solved_at = CASE WHEN NOT user_dsa_progress.is_solved THEN CURRENT_TIMESTAMP ELSE NULL END,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING is_solved
+            """,
+            (payload.user_id or 1, payload.problem_id)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    is_solved = row["is_solved"]
+    return {
+        "problem_id": payload.problem_id,
+        "is_solved": is_solved,
+        "xp_earned": 25 if is_solved else 0
+    }
+
+
+@app.post("/api/dsa/toggle-bookmark")
+def toggle_dsa_bookmark(payload: DSAToggleBookmarkRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO user_dsa_progress (user_id, problem_id, is_bookmarked, updated_at)
+            VALUES (%s, %s, true, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, problem_id)
+            DO UPDATE SET 
+                is_bookmarked = NOT user_dsa_progress.is_bookmarked,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING is_bookmarked
+            """,
+            (payload.user_id or 1, payload.problem_id)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {
+        "problem_id": payload.problem_id,
+        "is_bookmarked": row["is_bookmarked"]
     }
