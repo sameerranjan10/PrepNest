@@ -112,6 +112,12 @@ class SubmitTestRequest(BaseModel):
     answers: List[AnswerItem]
 
 
+class SingleSolveRequest(BaseModel):
+    user_id: Optional[int] = 1
+    question_id: int
+    selected_option: str
+
+
 # -------------------------------------------------------------
 # General Endpoints
 # -------------------------------------------------------------
@@ -546,12 +552,25 @@ def get_aptitude_categories():
             else 0.0
         )
 
+        # Company tags
+        cursor.execute(
+            """
+            SELECT DISTINCT company_tag
+            FROM aptitude_questions
+            WHERE company_tag IS NOT NULL AND company_tag != ''
+            ORDER BY company_tag
+            """
+        )
+        company_rows = cursor.fetchall()
+        companies_list = [row["company_tag"] for row in company_rows]
+
     finally:
         cursor.close()
         conn.close()
 
     return {
         "categories": categories,
+        "companies": companies_list,
         "overall_stats": {
             "total_tests_completed": total_tests,
             "overall_accuracy": overall_accuracy,
@@ -573,6 +592,7 @@ def get_aptitude_categories():
 def get_aptitude_questions(
     category: Optional[str] = "all",
     difficulty: Optional[str] = "all",
+    company: Optional[str] = "all",
     subtopic: Optional[str] = None,
     limit: Optional[int] = 10
 ):
@@ -585,6 +605,7 @@ def get_aptitude_questions(
             category,
             subtopic,
             difficulty,
+            company_tag,
             question_text,
             option_a,
             option_b,
@@ -606,7 +627,11 @@ def get_aptitude_questions(
         query += " AND LOWER(difficulty) = %s"
         params.append(difficulty.lower())
 
-    if subtopic:
+    if company and company.lower() != "all":
+        query += " AND LOWER(company_tag) = %s"
+        params.append(company.lower())
+
+    if subtopic and subtopic.lower() != "all":
         query += " AND subtopic = %s"
         params.append(subtopic)
 
@@ -628,6 +653,7 @@ def get_aptitude_questions(
                 "category": r["category"],
                 "subtopic": r["subtopic"],
                 "difficulty": r["difficulty"],
+                "company_tag": r["company_tag"] or "General",
                 "question_text": r["question_text"],
                 "options": {
                     "A": r["option_a"],
@@ -643,6 +669,7 @@ def get_aptitude_questions(
     return {
         "count": len(questions),
         "category": category,
+        "company": company,
         "questions": questions
     }
 
@@ -816,6 +843,23 @@ def submit_aptitude_test(
         )
 
         result_id = cursor.fetchone()["id"]
+
+        # Track question-level progress for user
+        user_id = payload.user_id or 1
+        for res_item in detailed_results:
+            if not res_item.get("is_unattempted"):
+                q_status = "solved" if res_item.get("is_correct") else "incorrect"
+                cursor.execute(
+                    """
+                    INSERT INTO user_question_progress 
+                    (user_id, question_id, status, selected_option, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (user_id, question_id)
+                    DO UPDATE SET status = EXCLUDED.status, selected_option = EXCLUDED.selected_option, updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, res_item["id"], q_status, res_item.get("selected_option"))
+                )
+
         conn.commit()
 
     except Exception:
@@ -941,3 +985,272 @@ def get_aptitude_result_detail(
         data["answers_data"] = {}
 
     return data
+
+
+# -------------------------------------------------------------
+# Company Tracks Endpoint
+# -------------------------------------------------------------
+
+@app.get("/api/companies")
+def get_companies():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT company_tag, COUNT(*) AS count
+            FROM aptitude_questions
+            WHERE company_tag IS NOT NULL AND company_tag != ''
+            GROUP BY company_tag
+            ORDER BY count DESC
+            """
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+    meta = {
+        "Google": {"logo": "🌐", "role": "Software Development Engineer (SDE)", "difficulty": "Hard"},
+        "Microsoft": {"logo": "🪟", "role": "Software Engineer", "difficulty": "Medium"},
+        "Amazon": {"logo": "📦", "role": "SDE-1 (Frontend / Backend)", "difficulty": "Hard"},
+        "Meta": {"logo": "♾️", "role": "Software Engineer", "difficulty": "Extreme"},
+        "TCS": {"logo": "🏢", "role": "Ninja / Digital / Prime Developer", "difficulty": "Medium"},
+        "Infosys": {"logo": "💼", "role": "Systems Engineer / Specialist (DSE)", "difficulty": "Medium"},
+        "Wipro": {"logo": "⚡", "role": "Project Engineer / Turbo", "difficulty": "Medium"},
+        "Accenture": {"logo": "🚀", "role": "Associate Software Engineer", "difficulty": "Medium"},
+        "Cognizant": {"logo": "💡", "role": "GenC / GenC Next Developer", "difficulty": "Medium"},
+        "Capgemini": {"logo": "🔷", "role": "Software Analyst", "difficulty": "Medium"},
+        "Deloitte": {"logo": "📊", "role": "Technology Consulting Analyst", "difficulty": "Medium"},
+    }
+
+    companies = []
+    for r in rows:
+        c_name = r["company_tag"]
+        info = meta.get(c_name, {"logo": "🏢", "role": "Software Engineer", "difficulty": "Medium"})
+        companies.append({
+            "id": c_name.lower(),
+            "name": c_name,
+            "logo": info["logo"],
+            "role": info["role"],
+            "hiringDifficulty": info["difficulty"],
+            "totalQuestions": r["count"],
+            "solvedQuestions": 0
+        })
+
+    return {"companies": companies}
+
+
+# -------------------------------------------------------------
+# Module & Question Directory Endpoints
+# -------------------------------------------------------------
+
+@app.get("/api/aptitude/modules")
+def get_aptitude_modules(user_id: Optional[int] = 1):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT 
+                q.category,
+                q.subtopic,
+                COUNT(q.id) AS total_questions,
+                COUNT(CASE WHEN p.status = 'solved' THEN 1 END) AS solved_questions
+            FROM aptitude_questions q
+            LEFT JOIN user_question_progress p 
+                ON q.id = p.question_id AND p.user_id = %s
+            GROUP BY q.category, q.subtopic
+            ORDER BY q.category, total_questions DESC
+            """,
+            (user_id or 1,)
+        )
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+    modules = {}
+    for r in rows:
+        cat = r["category"]
+        if cat not in modules:
+            modules[cat] = []
+        modules[cat].append({
+            "subtopic": r["subtopic"],
+            "total": r["total_questions"],
+            "solved": r["solved_questions"],
+            "progress": round((r["solved_questions"] / r["total_questions"]) * 100, 1) if r["total_questions"] > 0 else 0
+        })
+
+    return {"modules": modules}
+
+
+@app.get("/api/aptitude/directory")
+def get_aptitude_directory(
+    user_id: Optional[int] = 1,
+    category: Optional[str] = "all",
+    subtopic: Optional[str] = "all",
+    company: Optional[str] = "all",
+    difficulty: Optional[str] = "all",
+    status: Optional[str] = "all",
+    search: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    conditions = ["1=1"]
+    params = [user_id or 1]
+
+    if category and category.lower() != "all":
+        conditions.append("q.category = %s")
+        params.append(category.lower())
+
+    if subtopic and subtopic.lower() != "all":
+        conditions.append("q.subtopic = %s")
+        params.append(subtopic)
+
+    if company and company.lower() != "all":
+        conditions.append("LOWER(q.company_tag) = %s")
+        params.append(company.lower())
+
+    if difficulty and difficulty.lower() != "all":
+        conditions.append("LOWER(q.difficulty) = %s")
+        params.append(difficulty.lower())
+
+    if status == "solved":
+        conditions.append("p.status = 'solved'")
+    elif status == "unsolved":
+        conditions.append("(p.status IS NULL OR p.status != 'solved')")
+
+    if search and search.strip():
+        conditions.append("(q.question_text ILIKE %s OR q.subtopic ILIKE %s)")
+        params.append(f"%{search.strip()}%")
+        params.append(f"%{search.strip()}%")
+
+    where_clause = " AND ".join(conditions)
+
+    try:
+        # Count total matching
+        count_query = f"""
+            SELECT COUNT(*) AS total
+            FROM aptitude_questions q
+            LEFT JOIN user_question_progress p 
+                ON q.id = p.question_id AND p.user_id = %s
+            WHERE {where_clause}
+        """
+        cursor.execute(count_query, tuple(params))
+        total_matching = cursor.fetchone()["total"]
+
+        # Count total solved overall for this user
+        cursor.execute(
+            "SELECT COUNT(*) AS solved_total FROM user_question_progress WHERE user_id = %s AND status = 'solved'",
+            (user_id or 1,)
+        )
+        total_solved = cursor.fetchone()["solved_total"]
+
+        offset = max(0, (page - 1) * limit)
+        data_params = list(params)
+        data_params.extend([limit, offset])
+
+        data_query = f"""
+            SELECT 
+                q.id,
+                q.category,
+                q.subtopic,
+                q.difficulty,
+                q.company_tag,
+                q.question_text,
+                q.option_a,
+                q.option_b,
+                q.option_c,
+                q.option_d,
+                q.correct_option,
+                q.explanation,
+                p.status AS user_status,
+                p.selected_option AS user_selected
+            FROM aptitude_questions q
+            LEFT JOIN user_question_progress p 
+                ON q.id = p.question_id AND p.user_id = %s
+            WHERE {where_clause}
+            ORDER BY q.id ASC
+            LIMIT %s OFFSET %s
+        """
+        cursor.execute(data_query, tuple(data_params))
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+    questions = []
+    for r in rows:
+        is_solved = (r["user_status"] == "solved")
+        questions.append({
+            "id": r["id"],
+            "category": r["category"],
+            "subtopic": r["subtopic"],
+            "difficulty": r["difficulty"],
+            "company_tag": r["company_tag"] or "General",
+            "question_text": r["question_text"],
+            "options": {
+                "A": r["option_a"],
+                "B": r["option_b"],
+                "C": r["option_c"],
+                "D": r["option_d"]
+            },
+            "correct_option": r["correct_option"],
+            "explanation": r["explanation"],
+            "is_solved": is_solved,
+            "user_status": r["user_status"],
+            "user_selected": r["user_selected"]
+        })
+
+    return {
+        "questions": questions,
+        "total": total_matching,
+        "total_solved": total_solved,
+        "page": page,
+        "limit": limit,
+        "total_pages": max(1, (total_matching + limit - 1) // limit)
+    }
+
+
+@app.post("/api/aptitude/solve-single")
+def solve_single_question(payload: SingleSolveRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM aptitude_questions WHERE id = %s", (payload.question_id,))
+        q = cursor.fetchone()
+        if not q:
+            raise HTTPException(status_code=404, detail="Question not found")
+
+        correct = q["correct_option"].upper().strip()
+        selected = payload.selected_option.upper().strip()
+        is_correct = (selected == correct)
+        status = "solved" if is_correct else "incorrect"
+
+        cursor.execute(
+            """
+            INSERT INTO user_question_progress (user_id, question_id, status, selected_option, updated_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, question_id) 
+            DO UPDATE SET status = EXCLUDED.status, selected_option = EXCLUDED.selected_option, updated_at = CURRENT_TIMESTAMP
+            """,
+            (payload.user_id or 1, payload.question_id, status, selected)
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {
+        "question_id": payload.question_id,
+        "selected_option": selected,
+        "correct_option": correct,
+        "is_correct": is_correct,
+        "status": status,
+        "xp_earned": 25 if is_correct else 0,
+        "explanation": q["explanation"]
+    }

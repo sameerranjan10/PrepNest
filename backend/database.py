@@ -507,6 +507,19 @@ def init_db():
             completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
+
+    # 4. User Question Progress (Solved / Unsolved Tracker)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_question_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            question_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            selected_option TEXT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, question_id)
+        );
+    """)
     
     # Check if questions need seeding
     cursor.execute("SELECT COUNT(*) as count FROM aptitude_questions")

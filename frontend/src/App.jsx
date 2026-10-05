@@ -101,15 +101,16 @@ export default function App() {
             element={<LeaderboardPage />}
           />
 
+          <Route
+            path="/community"
+            element={<CommunityPage />}
+          />
+
           {/* Fallback - keep this LAST */}
           <Route
             path="*"
             element={<Navigate to="/dashboard" replace />}
           />
-          <Route
-  path="/community"
-  element={<CommunityPage />}
-/>
 
 
         </Routes>

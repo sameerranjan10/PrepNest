@@ -1,0 +1,41 @@
+[
+  {
+    "category": "quantitative",
+    "subtopic": "Speed, Distance & Time",
+    "difficulty": "Medium",
+    "company_tag": "TCS",
+    "question_text": "A car covers a distance of 450 km in 5 hours. What is its speed in meters per second?",
+    "option_a": "20 m/s",
+    "option_b": "25 m/s",
+    "option_c": "30 m/s",
+    "option_d": "35 m/s",
+    "correct_option": "B",
+    "explanation": "Speed = 450 km / 5 hrs = 90 km/hr. Converting to m/s: 90 * (5/18) = 25 m/s."
+  },
+  {
+    "category": "logical",
+    "subtopic": "Number Series",
+    "difficulty": "Easy",
+    "company_tag": "Infosys",
+    "question_text": "Look at this series: 7, 10, 8, 11, 9, 12, ... What number should come next?",
+    "option_a": "7",
+    "option_b": "10",
+    "option_c": "12",
+    "option_d": "13",
+    "correct_option": "B",
+    "explanation": "It is an alternating addition and subtraction series: +3, -2, +3, -2, +3, -2. Next number is 12 - 2 = 10."
+  },
+  {
+    "category": "verbal",
+    "subtopic": "Verbal Analogies",
+    "difficulty": "Easy",
+    "company_tag": "Capgemini",
+    "question_text": "CANDLE : WAX :: PAPER : ?",
+    "option_a": "Wood",
+    "option_b": "Tree",
+    "option_c": "Pulp",
+    "option_d": "Ink",
+    "correct_option": "C",
+    "explanation": "A candle is made from wax; paper is manufactured from wood pulp."
+  }
+]
