@@ -535,6 +535,7 @@ export default function AptitudePage() {
               <QuestionDirectory
                 availableCompanies={availableCompanies}
                 categories={categories}
+                initialCompany={companyFromUrl || 'all'}
                 onStartQuiz={(cat, count, diff, mode, comp, sub) =>
                   startQuiz(cat, count, diff, mode, comp, sub)
                 }

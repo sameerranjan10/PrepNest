@@ -992,18 +992,24 @@ def get_aptitude_result_detail(
 # -------------------------------------------------------------
 
 @app.get("/api/companies")
-def get_companies():
+def get_companies(user_id: Optional[int] = 1):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
             """
-            SELECT company_tag, COUNT(*) AS count
-            FROM aptitude_questions
-            WHERE company_tag IS NOT NULL AND company_tag != ''
-            GROUP BY company_tag
+            SELECT 
+                q.company_tag, 
+                COUNT(q.id) AS count,
+                COUNT(CASE WHEN p.status = 'solved' THEN 1 END) AS solved_count
+            FROM aptitude_questions q
+            LEFT JOIN user_question_progress p 
+                ON q.id = p.question_id AND p.user_id = %s
+            WHERE q.company_tag IS NOT NULL AND q.company_tag != ''
+            GROUP BY q.company_tag
             ORDER BY count DESC
-            """
+            """,
+            (user_id or 1,)
         )
         rows = cursor.fetchall()
     finally:
@@ -1011,31 +1017,109 @@ def get_companies():
         conn.close()
 
     meta = {
-        "Google": {"logo": "🌐", "role": "Software Development Engineer (SDE)", "difficulty": "Hard"},
-        "Microsoft": {"logo": "🪟", "role": "Software Engineer", "difficulty": "Medium"},
-        "Amazon": {"logo": "📦", "role": "SDE-1 (Frontend / Backend)", "difficulty": "Hard"},
-        "Meta": {"logo": "♾️", "role": "Software Engineer", "difficulty": "Extreme"},
-        "TCS": {"logo": "🏢", "role": "Ninja / Digital / Prime Developer", "difficulty": "Medium"},
-        "Infosys": {"logo": "💼", "role": "Systems Engineer / Specialist (DSE)", "difficulty": "Medium"},
-        "Wipro": {"logo": "⚡", "role": "Project Engineer / Turbo", "difficulty": "Medium"},
-        "Accenture": {"logo": "🚀", "role": "Associate Software Engineer", "difficulty": "Medium"},
-        "Cognizant": {"logo": "💡", "role": "GenC / GenC Next Developer", "difficulty": "Medium"},
-        "Capgemini": {"logo": "🔷", "role": "Software Analyst", "difficulty": "Medium"},
-        "Deloitte": {"logo": "📊", "role": "Technology Consulting Analyst", "difficulty": "Medium"},
+        "Google": {
+            "logo": "🌐", 
+            "role": "Software Development Engineer (SDE)", 
+            "difficulty": "Hard",
+            "test_pattern": "OA: 2 Coding Problems (60 mins) + Technical & Analytical Assessment",
+            "sections": ["Data Structures", "Algorithms", "System Analytical Thinking"]
+        },
+        "Microsoft": {
+            "logo": "🪟", 
+            "role": "Software Engineer", 
+            "difficulty": "Medium",
+            "test_pattern": "Codility OA: 3 Tasks (70 mins) + Analytical Aptitude",
+            "sections": ["Arrays & Strings", "Dynamic Programming", "Logical Reasoning"]
+        },
+        "Amazon": {
+            "logo": "📦", 
+            "role": "SDE-1 (Frontend / Backend)", 
+            "difficulty": "Hard",
+            "test_pattern": "Online Assessment (OA1 + OA2): 2 Coding (70 mins) + Work Simulation & Aptitude",
+            "sections": ["Problem Solving", "Behavioral Leadership", "Data Structures"]
+        },
+        "Meta": {
+            "logo": "♾️", 
+            "role": "Software Engineer", 
+            "difficulty": "Extreme",
+            "test_pattern": "HackerRank OA: 2 Coding (45 mins) + System Design Fundamentals",
+            "sections": ["Speed Coding", "Graph Algorithms", "Data Structures"]
+        },
+        "TCS": {
+            "logo": "🏢", 
+            "role": "Ninja / Digital / Prime Developer", 
+            "difficulty": "Medium",
+            "test_pattern": "TCS NQT: Numerical (20Q, 25m) + Verbal (25Q, 25m) + Reasoning (20Q, 25m) + Coding (2Q, 45m)",
+            "sections": ["Quantitative Aptitude", "Reasoning Ability", "Verbal Ability", "Coding"]
+        },
+        "Infosys": {
+            "logo": "💼", 
+            "role": "Systems Engineer / Specialist (DSE)", 
+            "difficulty": "Medium",
+            "test_pattern": "Infosys OA: Reasoning (15Q, 25m) + Mathematical (10Q, 35m) + Verbal (20Q, 20m) + Pseudocode (5Q, 10m)",
+            "sections": ["Mathematical Critical Thinking", "Logical Deduction", "Verbal Ability", "Pseudocode"]
+        },
+        "Wipro": {
+            "logo": "⚡", 
+            "role": "Project Engineer / Turbo", 
+            "difficulty": "Medium",
+            "test_pattern": "NLTH: Quantitative (16Q, 16m) + Logical (14Q, 14m) + Verbal (22Q, 18m) + Essay (1Q, 20m) + Coding (2Q, 60m)",
+            "sections": ["Quantitative Aptitude", "Logical Reasoning", "Verbal Ability", "Basic Coding"]
+        },
+        "Accenture": {
+            "logo": "🚀", 
+            "role": "Associate Software Engineer", 
+            "difficulty": "Medium",
+            "test_pattern": "Cognitive (50Q) + Technical (40Q) in 90 mins (Critical Thinking, English, MS Office, Pseudocode, Cloud)",
+            "sections": ["Cognitive Assessment", "Technical & Pseudocode", "Coding (45m)"]
+        },
+        "Cognizant": {
+            "logo": "💡", 
+            "role": "GenC / GenC Next Developer", 
+            "difficulty": "Medium",
+            "test_pattern": "GenC Assessment: Quantitative (25Q, 35m) + Logical (20Q, 35m) + Verbal (20Q, 20m) + Coding",
+            "sections": ["Analytical Ability", "English Comprehension", "Domain Technical"]
+        },
+        "Capgemini": {
+            "logo": "🔷", 
+            "role": "Software Analyst", 
+            "difficulty": "Medium",
+            "test_pattern": "Capgemini OA: Pseudocode (30Q, 30m) + English (30Q, 30m) + Game-Based Aptitude (4 games) + Behavioral",
+            "sections": ["Pseudocode Analysis", "Verbal Ability", "Game-Based Aptitude"]
+        },
+        "Deloitte": {
+            "logo": "📊", 
+            "role": "Technology Consulting Analyst", 
+            "difficulty": "Medium",
+            "test_pattern": "Deloitte OA: Quantitative (15Q, 15m) + Logical (15Q, 15m) + Verbal (15Q, 15m) + Computer Fundamentals (30Q, 30m)",
+            "sections": ["Quantitative Analysis", "Logical Deduction", "Verbal Communication", "Computer Science"]
+        },
     }
 
     companies = []
     for r in rows:
         c_name = r["company_tag"]
-        info = meta.get(c_name, {"logo": "🏢", "role": "Software Engineer", "difficulty": "Medium"})
+        info = meta.get(c_name, {
+            "logo": "🏢", 
+            "role": "Software Engineer", 
+            "difficulty": "Medium",
+            "test_pattern": "Online Assessment & Technical Interview Track",
+            "sections": ["Aptitude", "Technical", "Coding"]
+        })
+        solved = r["solved_count"] or 0
+        total = r["count"]
+        pct = round((solved / total) * 100, 1) if total > 0 else 0.0
         companies.append({
             "id": c_name.lower(),
             "name": c_name,
             "logo": info["logo"],
             "role": info["role"],
             "hiringDifficulty": info["difficulty"],
-            "totalQuestions": r["count"],
-            "solvedQuestions": 0
+            "testPattern": info.get("test_pattern", "Online Assessment"),
+            "sections": info.get("sections", []),
+            "totalQuestions": total,
+            "solvedQuestions": solved,
+            "progressPercent": pct
         })
 
     return {"companies": companies}
@@ -1046,12 +1130,21 @@ def get_companies():
 # -------------------------------------------------------------
 
 @app.get("/api/aptitude/modules")
-def get_aptitude_modules(user_id: Optional[int] = 1):
+def get_aptitude_modules(
+    user_id: Optional[int] = 1,
+    company: Optional[str] = None
+):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        where_extra = ""
+        params = [user_id or 1]
+        if company and company.lower() != "all":
+            where_extra = "WHERE LOWER(q.company_tag) = %s"
+            params.append(company.lower())
+
         cursor.execute(
-            """
+            f"""
             SELECT 
                 q.category,
                 q.subtopic,
@@ -1060,10 +1153,11 @@ def get_aptitude_modules(user_id: Optional[int] = 1):
             FROM aptitude_questions q
             LEFT JOIN user_question_progress p 
                 ON q.id = p.question_id AND p.user_id = %s
+            {where_extra}
             GROUP BY q.category, q.subtopic
             ORDER BY q.category, total_questions DESC
             """,
-            (user_id or 1,)
+            tuple(params)
         )
         rows = cursor.fetchall()
     finally:
@@ -1143,12 +1237,31 @@ def get_aptitude_directory(
         cursor.execute(count_query, tuple(params))
         total_matching = cursor.fetchone()["total"]
 
-        # Count total solved overall for this user
-        cursor.execute(
-            "SELECT COUNT(*) AS solved_total FROM user_question_progress WHERE user_id = %s AND status = 'solved'",
-            (user_id or 1,)
-        )
-        total_solved = cursor.fetchone()["solved_total"]
+        # Count total solved in this scope for this user
+        if company and company.lower() != "all":
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS solved_total 
+                FROM user_question_progress p
+                JOIN aptitude_questions q ON p.question_id = q.id
+                WHERE p.user_id = %s AND p.status = 'solved' AND LOWER(q.company_tag) = %s
+                """,
+                (user_id or 1, company.lower())
+            )
+            total_solved = cursor.fetchone()["solved_total"]
+
+            cursor.execute(
+                "SELECT COUNT(*) AS c_total FROM aptitude_questions WHERE LOWER(company_tag) = %s",
+                (company.lower(),)
+            )
+            company_total = cursor.fetchone()["c_total"]
+        else:
+            cursor.execute(
+                "SELECT COUNT(*) AS solved_total FROM user_question_progress WHERE user_id = %s AND status = 'solved'",
+                (user_id or 1,)
+            )
+            total_solved = cursor.fetchone()["solved_total"]
+            company_total = None
 
         offset = max(0, (page - 1) * limit)
         data_params = list(params)
@@ -1210,6 +1323,7 @@ def get_aptitude_directory(
         "questions": questions,
         "total": total_matching,
         "total_solved": total_solved,
+        "company_total": company_total,
         "page": page,
         "limit": limit,
         "total_pages": max(1, (total_matching + limit - 1) // limit)

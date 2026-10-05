@@ -20,11 +20,18 @@ import {
   Award
 } from 'lucide-react';
 
-export default function QuestionDirectory({ availableCompanies = [], categories = [], onStartQuiz }) {
+export default function QuestionDirectory({ 
+  availableCompanies = [], 
+  categories = [], 
+  initialCompany = 'all',
+  lockCompany = false,
+  companyMeta = null,
+  onStartQuiz 
+}) {
   // Directory Filters
   const [category, setCategory] = useState('all');
   const [subtopic, setSubtopic] = useState('all');
-  const [company, setCompany] = useState('all');
+  const [company, setCompany] = useState(initialCompany);
   const [difficulty, setDifficulty] = useState('all');
   const [status, setStatus] = useState('all'); // 'all' | 'solved' | 'unsolved'
   const [search, setSearch] = useState('');
@@ -34,6 +41,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
   const [questions, setQuestions] = useState([]);
   const [totalMatching, setTotalMatching] = useState(0);
   const [totalSolved, setTotalSolved] = useState(0);
+  const [companyTotal, setCompanyTotal] = useState(null);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
 
@@ -47,10 +55,18 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
   const [solveResult, setSolveResult] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch modules summary on mount
+  // Sync initialCompany if changed from outside
   useEffect(() => {
-    fetchModules();
-  }, []);
+    if (initialCompany) {
+      setCompany(initialCompany);
+      setPage(1);
+    }
+  }, [initialCompany]);
+
+  // Fetch modules summary whenever company filter changes
+  useEffect(() => {
+    fetchModules(company);
+  }, [company]);
 
   // Fetch questions whenever filters change
   useEffect(() => {
@@ -74,9 +90,13 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
     setPage(1);
   }, [category, modules]);
 
-  const fetchModules = async () => {
+  const fetchModules = async (comp = company) => {
     try {
-      const res = await fetch('http://localhost:8000/api/aptitude/modules');
+      let url = 'http://localhost:8000/api/aptitude/modules';
+      if (comp && comp !== 'all') {
+        url += `?company=${encodeURIComponent(comp)}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setModules(data.modules || {});
@@ -103,6 +123,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
         setQuestions(data.questions || []);
         setTotalMatching(data.total || 0);
         setTotalSolved(data.total_solved || 0);
+        setCompanyTotal(data.company_total || null);
         setTotalPages(data.total_pages || 1);
         setPage(data.page || 1);
       }
@@ -181,8 +202,12 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
     }
   };
 
-  const totalBankCount = 1172;
-  const progressPercent = Math.min(100, Math.round((totalSolved / totalBankCount) * 100));
+  const quantTotal = (modules['quantitative'] || []).reduce((acc, m) => acc + m.total, 0);
+  const logicalTotal = (modules['logical'] || []).reduce((acc, m) => acc + m.total, 0);
+  const verbalTotal = (modules['verbal'] || []).reduce((acc, m) => acc + m.total, 0);
+  const sumDomains = quantTotal + logicalTotal + verbalTotal;
+  const displayBankCount = sumDomains > 0 ? sumDomains : (companyTotal || (category === 'all' && company === 'all' ? 1172 : totalMatching));
+  const progressPercent = displayBankCount > 0 ? Math.min(100, Math.round((totalSolved / displayBankCount) * 100)) : 0;
 
   return (
     <div className="space-y-8">
@@ -191,15 +216,19 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
         <div className="space-y-2 w-full md:w-auto">
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              Interactive Question Bank
+              {company !== 'all' ? `${company} Recruitment Archive` : 'Interactive Question Bank'}
             </span>
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              {totalBankCount} Total Available
+              {displayBankCount} Total Available
             </span>
           </div>
-          <h2 className="text-xl font-extrabold text-white">Your Placement Problem Tracker</h2>
+          <h2 className="text-xl font-extrabold text-white">
+            {company !== 'all' ? `${company} Problem Tracker & Syllabus` : 'Your Placement Problem Tracker'}
+          </h2>
           <p className="text-xs text-slate-400">
-            Browse, filter, and solve questions on the spot. Your progress updates and saves automatically.
+            {company !== 'all'
+              ? `Browse, filter, and solve questions tagged for ${company}. Track your solved progress module-wise.`
+              : 'Browse, filter, and solve questions on the spot. Your progress updates and saves automatically.'}
           </p>
         </div>
 
@@ -211,7 +240,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
           </div>
           <div className="w-px h-10 bg-slate-800" />
           <div className="text-center px-2">
-            <div className="text-2xl font-black text-amber-400">{Math.max(0, totalBankCount - totalSolved)}</div>
+            <div className="text-2xl font-black text-amber-400">{Math.max(0, displayBankCount - totalSolved)}</div>
             <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Remaining</div>
           </div>
           <div className="w-px h-10 bg-slate-800" />
@@ -235,7 +264,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
                   : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              All Domains ({totalBankCount})
+              All Domains ({displayBankCount})
             </button>
             <button
               onClick={() => { setCategory('quantitative'); setPage(1); }}
@@ -245,7 +274,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
                   : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              🔢 Quantitative (467)
+              🔢 Quantitative ({quantTotal || (company === 'all' ? 467 : 0)})
             </button>
             <button
               onClick={() => { setCategory('logical'); setPage(1); }}
@@ -255,7 +284,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
                   : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              🧠 Logical Reasoning (398)
+              🧠 Logical Reasoning ({logicalTotal || (company === 'all' ? 398 : 0)})
             </button>
             <button
               onClick={() => { setCategory('verbal'); setPage(1); }}
@@ -265,7 +294,7 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
                   : 'bg-slate-800 text-slate-400 hover:text-white'
               }`}
             >
-              📖 Verbal Ability (307)
+              📖 Verbal Ability ({verbalTotal || (company === 'all' ? 307 : 0)})
             </button>
           </div>
 
@@ -326,19 +355,29 @@ export default function QuestionDirectory({ availableCompanies = [], categories 
             ))}
           </select>
 
-          {/* Company Filter */}
-          <select
-            value={company}
-            onChange={(e) => { setCompany(e.target.value); setPage(1); }}
-            className="bg-slate-950 border border-slate-800 text-xs text-slate-300 px-3 py-2 rounded-xl focus:outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="all">🏢 All Companies ({availableCompanies.length})</option>
-            {availableCompanies.map((c) => (
-              <option key={c} value={c}>
-                {c} Track
-              </option>
-            ))}
-          </select>
+          {/* Company Filter or Locked Indicator */}
+          {lockCompany ? (
+            <div className="flex items-center justify-between bg-slate-950 border border-indigo-500/40 px-3 py-2 rounded-xl text-xs text-indigo-300 font-bold">
+              <span className="flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+                {company} OA Track
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold">Active</span>
+            </div>
+          ) : (
+            <select
+              value={company}
+              onChange={(e) => { setCompany(e.target.value); setPage(1); }}
+              className="bg-slate-950 border border-slate-800 text-xs text-slate-300 px-3 py-2 rounded-xl focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="all">🏢 All Companies ({availableCompanies.length})</option>
+              {availableCompanies.map((c) => (
+                <option key={c} value={c}>
+                  {c} Track
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* Difficulty Filter */}
           <select
