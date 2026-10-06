@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
+import DSAPracticeModal from '@/components/DSAPracticeModal';
 import { 
   Code2, 
   Filter, 
@@ -27,6 +28,9 @@ export default function DSAPage() {
   const urlCompany = searchParams.get('company');
   const urlTopic = searchParams.get('topic');
   const urlDifficulty = searchParams.get('difficulty');
+
+  // In-platform solver modal state
+  const [activePracticeProblemId, setActivePracticeProblemId] = useState(null);
 
   // Data State
   const [problems, setProblems] = useState([]);
@@ -457,14 +461,12 @@ export default function DSAPage() {
 
                         {/* Problem Title */}
                         <td className="py-3.5 px-4 font-bold text-slate-200">
-                          <a
-                            href={prob.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-indigo-400 hover:underline transition flex items-center gap-1.5"
+                          <button
+                            onClick={() => setActivePracticeProblemId(prob.id)}
+                            className="hover:text-indigo-400 transition flex items-center gap-1.5 text-left group cursor-pointer"
                           >
-                            <span>{prob.title}</span>
-                          </a>
+                            <span className="group-hover:underline">{prob.title}</span>
+                          </button>
                         </td>
 
                         {/* Topic Badges */}
@@ -527,17 +529,15 @@ export default function DSAPage() {
                           </div>
                         </td>
 
-                        {/* Action Solve Link */}
+                        {/* Action Solve Button */}
                         <td className="py-3.5 px-4 text-right">
-                          <a
-                            href={prob.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-md shadow-indigo-600/20 transition"
+                          <button
+                            onClick={() => setActivePracticeProblemId(prob.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-[11px] font-bold shadow-md shadow-indigo-600/20 transition cursor-pointer"
                           >
+                            <Code2 className="w-3.5 h-3.5" />
                             <span>Solve</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -571,6 +571,27 @@ export default function DSAPage() {
           </div>
         </main>
       </div>
+
+      {/* In-Platform DSA Practice Workspace Modal */}
+      {activePracticeProblemId && (
+        <DSAPracticeModal
+          problemId={activePracticeProblemId}
+          onClose={() => setActivePracticeProblemId(null)}
+          onProblemUpdated={(probId, updates) => {
+            setProblems((prev) =>
+              prev.map((p) => (p.id === probId ? { ...p, ...updates } : p))
+            );
+            if (updates.is_solved !== undefined) {
+              setMeta((prev) => ({
+                ...prev,
+                solved_count: updates.is_solved
+                  ? prev.solved_count + 1
+                  : Math.max(0, prev.solved_count - 1)
+              }));
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
