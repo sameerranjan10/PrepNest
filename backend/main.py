@@ -1022,6 +1022,26 @@ def get_companies(user_id: Optional[int] = 1):
             (user_id or 1,)
         )
         rows = cursor.fetchall()
+
+        # Query DSA problem counts and user solved counts per company
+        cursor.execute(
+            """
+            SELECT 
+                comp,
+                COUNT(p.id) AS dsa_total,
+                COUNT(CASE WHEN up.is_solved = TRUE THEN 1 END) AS dsa_solved
+            FROM (
+                SELECT id, unnest(companies) AS comp
+                FROM dsa_problems
+            ) p
+            LEFT JOIN user_dsa_progress up 
+                ON p.id = up.problem_id AND up.user_id = %s
+            GROUP BY comp
+            """,
+            (user_id or 1,)
+        )
+        dsa_rows = cursor.fetchall()
+        dsa_by_company = {r["comp"]: {"total": r["dsa_total"], "solved": r["dsa_solved"]} for r in dsa_rows}
     finally:
         cursor.close()
         conn.close()
@@ -1119,6 +1139,7 @@ def get_companies(user_id: Optional[int] = 1):
         solved = r["solved_count"] or 0
         total = r["count"]
         pct = round((solved / total) * 100, 1) if total > 0 else 0.0
+        dsa_info = dsa_by_company.get(c_name, {"total": 0, "solved": 0})
         companies.append({
             "id": c_name.lower(),
             "name": c_name,
@@ -1129,7 +1150,9 @@ def get_companies(user_id: Optional[int] = 1):
             "sections": info.get("sections", []),
             "totalQuestions": total,
             "solvedQuestions": solved,
-            "progressPercent": pct
+            "progressPercent": pct,
+            "dsaTotal": dsa_info["total"],
+            "dsaSolved": dsa_info["solved"]
         })
 
     return {"companies": companies}

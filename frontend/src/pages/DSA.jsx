@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 import { 
@@ -22,6 +23,11 @@ import {
 } from 'lucide-react';
 
 export default function DSAPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlCompany = searchParams.get('company');
+  const urlTopic = searchParams.get('topic');
+  const urlDifficulty = searchParams.get('difficulty');
+
   // Data State
   const [problems, setProblems] = useState([]);
   const [meta, setMeta] = useState({
@@ -36,14 +42,23 @@ export default function DSAPage() {
 
   // Filters State
   const [search, setSearch] = useState('');
-  const [difficulty, setDifficulty] = useState('all');
-  const [company, setCompany] = useState('all');
-  const [topic, setTopic] = useState('all');
+  const [difficulty, setDifficulty] = useState(urlDifficulty || 'all');
+  const [company, setCompany] = useState(urlCompany || 'all');
+  const [topic, setTopic] = useState(urlTopic || 'all');
   const [status, setStatus] = useState('all'); // 'all' | 'solved' | 'unsolved' | 'bookmarked'
   const [sortBy, setSortBy] = useState('id'); // 'id' | 'difficulty' | 'acceptance' | 'title'
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalMatching, setTotalMatching] = useState(0);
+
+  // Sync if URL query param changes
+  useEffect(() => {
+    const compParam = searchParams.get('company');
+    if (compParam && compParam !== company) {
+      setCompany(compParam);
+      setPage(1);
+    }
+  }, [searchParams]);
 
   // Fetch metadata on mount
   useEffect(() => {
@@ -294,10 +309,26 @@ export default function DSAPage() {
               {/* Company Filter Dropdown */}
               <select
                 value={company}
-                onChange={(e) => { setCompany(e.target.value); setPage(1); }}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCompany(val);
+                  setPage(1);
+                  if (val === 'all') {
+                    const newParams = new URLSearchParams(searchParams);
+                    newParams.delete('company');
+                    setSearchParams(newParams);
+                  } else {
+                    setSearchParams({ ...Object.fromEntries(searchParams), company: val });
+                  }
+                }}
                 className="bg-slate-950 border border-slate-800 text-xs text-slate-300 px-3 py-2 rounded-xl focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="all">🏢 All Companies ({meta.top_companies.length || 470}+)</option>
+                {company !== 'all' && !meta.top_companies.some((c) => c.company.toLowerCase() === company.toLowerCase()) && (
+                  <option value={company}>
+                    {company} (Selected Track)
+                  </option>
+                )}
                 {meta.top_companies.map((c) => (
                   <option key={c.company} value={c.company}>
                     {c.company} ({c.count} Qs)
