@@ -1869,3 +1869,9 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
         "message": "All test cases passed! +25 XP awarded."
     }
 
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
+
