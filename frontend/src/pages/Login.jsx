@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, CheckCircle2, Flame } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Sparkles, Mail, Lock, ArrowRight, AlertCircle, CheckCircle2, Flame, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectParam = searchParams.get('redirect') || '/dashboard';
   const { login } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,7 +22,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/auth/login', {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password })
@@ -29,9 +34,9 @@ export default function LoginPage() {
       }
 
       login(data.user, data.access_token);
-      navigate('/dashboard');
+      navigate(redirectParam, { replace: true });
     } catch (err) {
-      setError(err.message || 'Authentication failed. Make sure FastAPI server is running.');
+      setError(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
@@ -63,33 +68,49 @@ export default function LoginPage() {
             </h2>
 
             <p className="text-sm text-slate-400 leading-relaxed mb-6">
-              Track your DSA progress, resume ATS scores, and practice mock interviews with real-time AI feedback.
+              Track your DSA problem solving, resume ATS score, and follow data-driven roadmaps synchronized in real-time.
             </p>
 
             <div className="space-y-3 pt-2">
               <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>FastAPI JWT OAuth2 Protected Session</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>Neon Authentication (PostgreSQL Native Security)</span>
               </div>
               <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>Synchronized LeetCode & Company Solves</span>
+                <span>Synchronized LeetCode, DSA & Roadmap Tracks</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>AI Resume Analyzer & Skill Gap Recommendations</span>
               </div>
             </div>
           </div>
 
           <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs text-slate-400 flex items-center gap-3">
             <Flame className="w-5 h-5 text-orange-400 flex-shrink-0" />
-            <span>Join 12,400+ students actively preparing for campus hiring drives.</span>
+            <span>Join 12,400+ students actively preparing for top tech drives.</span>
           </div>
         </div>
 
         {/* Right Side: Login Form */}
         <div className="p-8 lg:p-10 flex flex-col justify-center">
           <div className="mb-6">
-            <h3 className="text-2xl font-bold text-white mb-1">Sign In</h3>
-            <p className="text-xs text-slate-400">Enter your registered credentials below</p>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-2xl font-bold text-white">Sign In</h3>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Neon Auth
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">Enter your registered credentials to access your dashboard</p>
           </div>
+
+          {searchParams.has('redirect') && (
+            <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs flex items-center gap-2">
+              <Sparkles className="w-4 h-4 flex-shrink-0 text-indigo-400" />
+              <span>Please sign in to access your interactive dashboard and saved progress.</span>
+            </div>
+          )}
 
           {error && (
             <div className="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
@@ -140,13 +161,16 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer"
             >
-              {loading ? 'Authenticating with FastAPI...' : 'Sign In to Workspace'} <ArrowRight className="w-4 h-4" />
+              {loading ? 'Authenticating with Neon...' : 'Sign In to Workspace'} <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
           <div className="mt-6 text-center text-xs text-slate-400">
             Don't have an account?{' '}
-            <Link to="/signup" className="text-indigo-400 font-bold hover:underline">
+            <Link 
+              to={`/signup?redirect=${encodeURIComponent(redirectParam)}`} 
+              className="text-indigo-400 font-bold hover:underline"
+            >
               Register here
             </Link>
           </div>

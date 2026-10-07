@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 import { 
   Sparkles, ArrowRight, BrainCircuit, Wand2, ShieldCheck, 
   Target, CheckCircle2, Star, Zap, Flame, Trophy, ChevronRight,
-  Code2, Users, Play, HelpCircle, ChevronDown, Award
+  Code2, Users, Play, HelpCircle, ChevronDown, Award, LayoutDashboard
 } from 'lucide-react';
 
 export default function LandingPage() {
+  const { isAuthenticated } = useAuth();
   const [activeFaq, setActiveFaq] = useState(null);
+
 
   const toggleFaq = (idx) => {
     setActiveFaq(activeFaq === idx ? null : idx);
@@ -39,18 +42,29 @@ export default function LandingPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <Link 
-            to="/login"
-            className="px-4 py-2 rounded-xl text-sm font-bold text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent hover:border-slate-800 transition-all"
-          >
-            Sign In
-          </Link>
-          <Link 
-            to="/signup"
-            className="px-5 py-2.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:opacity-95 text-white shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-1.5"
-          >
-            Start Preparing <ArrowRight className="w-4 h-4" />
-          </Link>
+          {isAuthenticated ? (
+            <Link 
+              to="/dashboard"
+              className="px-5 py-2.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:opacity-95 text-white shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-1.5"
+            >
+              <LayoutDashboard className="w-4 h-4" /> Go to Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link 
+                to="/login"
+                className="px-4 py-2 rounded-xl text-sm font-bold text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent hover:border-slate-800 transition-all"
+              >
+                Sign In
+              </Link>
+              <Link 
+                to="/signup"
+                className="px-5 py-2.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:opacity-95 text-white shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-1.5"
+              >
+                Start Preparing <ArrowRight className="w-4 h-4" />
+              </Link>
+            </>
+          )}
         </div>
       </nav>
 
@@ -76,19 +90,20 @@ export default function LandingPage() {
           {/* Action CTAs */}
           <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
             <Link 
-              to="/signup"
+              to={isAuthenticated ? "/dashboard" : "/signup?redirect=/dashboard"}
               className="px-8 py-4 rounded-xl text-base font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-xl shadow-indigo-500/30 flex items-center gap-2.5 hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
-              Get Started Free <ArrowRight className="w-5 h-5" />
+              {isAuthenticated ? "Open Dashboard" : "Get Started Free"} <ArrowRight className="w-5 h-5" />
             </Link>
 
             <Link 
-              to="/dashboard"
+              to={isAuthenticated ? "/dashboard" : "/login?redirect=/dashboard"}
               className="px-8 py-4 rounded-xl text-base font-bold bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 text-slate-200 backdrop-blur-xl flex items-center gap-2 hover:bg-slate-900 transition-all shadow-lg"
             >
               <Play className="w-4 h-4 fill-slate-300" /> View Interactive Dashboard
             </Link>
           </div>
+
 
           {/* Live User Activity Banner */}
           <div className="pt-6 flex items-center justify-center gap-6 text-xs text-slate-400 font-semibold">

@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Sparkles, Mail, Lock, User as UserIcon, ArrowRight, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 export default function SignupPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectParam = searchParams.get('redirect') || '/dashboard';
   const { login } = useAuth();
+
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,7 +23,7 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/api/auth/register', {
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ full_name: fullName.trim(), email: email.trim(), password })
@@ -30,9 +35,9 @@ export default function SignupPage() {
       }
 
       login(data.user, data.access_token);
-      navigate('/dashboard');
+      navigate(redirectParam, { replace: true });
     } catch (err) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -60,43 +65,44 @@ export default function SignupPage() {
             </div>
 
             <h2 className="text-2xl lg:text-3xl font-extrabold text-white leading-tight mb-4">
-              Unlock Your SDE Placement Track
+              Join 12,400+ Candidates Getting Placement Ready
             </h2>
 
             <p className="text-sm text-slate-400 leading-relaxed mb-6">
-              Create a free account to benchmark your placement readiness score and start practicing with AI mock interviewers.
+              Create your account with Neon Authentication and start your personalized technical preparation roadmap today.
             </p>
 
-            <div className="space-y-4 pt-2">
-              <div className="flex items-start gap-3 text-xs font-semibold text-slate-300">
-                <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-white font-bold">Real-time Voice Mock Interviews</div>
-                  <div className="text-slate-400 font-normal">Practice technical & HR rounds</div>
-                </div>
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>Protected by Neon Authentication</span>
               </div>
-
-              <div className="flex items-start gap-3 text-xs font-semibold text-slate-300">
-                <CheckCircle2 className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-white font-bold">Curated Company DSA Sets</div>
-                  <div className="text-slate-400 font-normal">Amazon, Microsoft & Google tags</div>
-                </div>
+              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>Synchronized with Neon PostgreSQL Database</span>
+              </div>
+              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>Free 250 AI Studio Diagnostic Credits Included</span>
               </div>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs text-slate-400 flex items-center gap-3">
-            <ShieldCheck className="w-5 h-5 text-indigo-400 flex-shrink-0" />
-            <span>FastAPI Backend Security with NeonDB Cloud PostgreSQL.</span>
+          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs text-slate-400">
+            <span>By registering, you agree to PrepNest's terms of service and community privacy policies.</span>
           </div>
         </div>
 
-        {/* Right Side: Signup Form */}
+        {/* Right Side: Registration Form */}
         <div className="p-8 lg:p-10 flex flex-col justify-center">
           <div className="mb-6">
-            <h3 className="text-2xl font-bold text-white mb-1">Create Account</h3>
-            <p className="text-xs text-slate-400">Start your placement preparation for free</p>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-2xl font-bold text-white">Create Account</h3>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Neon Auth
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">Get instant access to your personalized dashboard</p>
           </div>
 
           {error && (
@@ -118,7 +124,7 @@ export default function SignupPage() {
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Alex Mercer"
+                  placeholder="Vivek Sharma"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
@@ -135,7 +141,7 @@ export default function SignupPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="alex@university.edu"
+                  placeholder="student@university.edu"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
@@ -163,13 +169,16 @@ export default function SignupPage() {
               disabled={loading}
               className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer"
             >
-              {loading ? 'Creating Account...' : 'Get Started Free'} <ArrowRight className="w-4 h-4" />
+              {loading ? 'Registering with Neon...' : 'Get Started Free'} <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
           <div className="mt-6 text-center text-xs text-slate-400">
             Already have an account?{' '}
-            <Link to="/login" className="text-indigo-400 font-bold hover:underline">
+            <Link 
+              to={`/login?redirect=${encodeURIComponent(redirectParam)}`} 
+              className="text-indigo-400 font-bold hover:underline"
+            >
               Sign In
             </Link>
           </div>

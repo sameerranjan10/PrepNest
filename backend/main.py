@@ -3,7 +3,7 @@ import sys
 import json
 from typing import List, Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -12,8 +12,21 @@ from auth import (
     decode_access_token,
     hash_password,
     verify_password,
+    neon_auth_sign_up,
+    neon_auth_sign_in,
+    verify_neon_session,
 )
+
 from database import get_db_connection, init_db
+from resume_service import (
+    full_resume_analysis,
+    get_available_companies_and_roles,
+    improve_bullet_points,
+    enhance_single_bullet,
+    match_job_description,
+    map_roadmaps_and_dsa,
+    match_company_and_role,
+)
 
 app = FastAPI(title="PrepNest API & Aptitude Practice Module")
 
@@ -130,6 +143,17 @@ class DSAToggleBookmarkRequest(BaseModel):
     problem_id: int
 
 
+class RoadmapProgressRequest(BaseModel):
+    topic_id: int
+    status: str = "completed"
+    user_id: Optional[int] = None
+
+
+class RoadmapResetRequest(BaseModel):
+    domain_id: Optional[str] = None
+    user_id: Optional[int] = None
+
+
 # -------------------------------------------------------------
 # General Endpoints
 # -------------------------------------------------------------
@@ -152,69 +176,51 @@ def register_user(user_data: UserRegister):
     cursor = conn.cursor()
 
     email = user_data.email.lower().strip()
+    full_name = user_data.full_name.strip()
 
-    try:
-        # Check whether user already exists
-        cursor.execute(
-            "SELECT id FROM users WHERE email = %s",
-            (email,)
-        )
-
-        if cursor.fetchone():
-            raise HTTPException(
-                status_code=400,
-                detail="User with this email already exists"
-            )
-
-        hashed = hash_password(user_data.password)
-
-        # PostgreSQL uses RETURNING instead of lastrowid
-        cursor.execute(
-            """
-            INSERT INTO users
-            (email, full_name, hashed_password, plan, credits)
-            VALUES (%s, %s, %s, 'Pro', 250)
-            RETURNING id, email, full_name, plan, credits, created_at
-            """,
-            (
-                email,
-                user_data.full_name.strip(),
-                hashed
-            )
-        )
-
-        user_row = cursor.fetchone()
-        conn.commit()
-
-    except HTTPException:
-        conn.rollback()
+    # 1. Register with Neon Auth
+    neon_success, neon_data, neon_err = neon_auth_sign_up(full_name, email, user_data.password)
+    if not neon_success:
         cursor.close()
         conn.close()
-        raise
+        raise HTTPException(
+            status_code=400,
+            detail=neon_err or "Registration failed on Neon Auth"
+        )
 
+    neon_token = neon_data.get("token") if neon_data else None
+
+    # 2. Synchronize with public.users table
+    try:
+        cursor.execute("SELECT id, email, full_name, plan, credits, created_at FROM users WHERE email = %s", (email,))
+        existing = cursor.fetchone()
+        hashed = hash_password(user_data.password)
+
+        if not existing:
+            cursor.execute("""
+                INSERT INTO users (email, full_name, hashed_password, plan, credits)
+                VALUES (%s, %s, %s, 'Pro', 250)
+                RETURNING id, email, full_name, plan, credits, created_at;
+            """, (email, full_name, hashed))
+            user_row = cursor.fetchone()
+        else:
+            user_row = existing
+
+        conn.commit()
     except Exception as e:
         conn.rollback()
         cursor.close()
         conn.close()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Database insertion failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Database synchronization failed: {str(e)}")
 
     cursor.close()
     conn.close()
 
     user = dict(user_row)
-
     if user.get("created_at"):
         user["created_at"] = str(user["created_at"])
 
-    token = create_access_token(
-        {
-            "sub": user["email"],
-            "user_id": user["id"]
-        }
-    )
+    token = neon_token or create_access_token({"sub": user["email"], "user_id": user["id"]})
 
     return {
         "access_token": token,
@@ -227,50 +233,84 @@ def register_user(user_data: UserRegister):
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login_user(user_data: UserLogin):
+    email = user_data.email.lower().strip()
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    neon_token = None
+    neon_user = None
+
+    # 1. Attempt authentication with Neon Auth
+    neon_success, neon_data, neon_err = neon_auth_sign_in(email, user_data.password)
+    if neon_success and neon_data:
+        neon_token = neon_data.get("token")
+        neon_user = neon_data.get("user")
+    else:
+        # Check if user is in public.users with legacy hash (auto-migration to Neon Auth)
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        legacy_row = cursor.fetchone()
+        if legacy_row and verify_password(user_data.password, legacy_row.get("hashed_password", "")):
+            full_name = legacy_row.get("full_name") or "PrepNest Student"
+            neon_auth_sign_up(full_name, email, user_data.password)
+            succ, sdata, _ = neon_auth_sign_in(email, user_data.password)
+            if succ and sdata:
+                neon_token = sdata.get("token")
+        else:
+            cursor.close()
+            conn.close()
+            raise HTTPException(
+                status_code=401,
+                detail=neon_err or "Invalid email or password"
+            )
+
+    # 2. Ensure user exists in public.users
     try:
-        cursor.execute(
-            "SELECT * FROM users WHERE email = %s",
-            (user_data.email.lower().strip(),)
-        )
-        row = cursor.fetchone()
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            name = neon_user.get("name") if neon_user else "PrepNest User"
+            hashed = hash_password(user_data.password)
+            cursor.execute("""
+                INSERT INTO users (email, full_name, hashed_password, plan, credits)
+                VALUES (%s, %s, %s, 'Pro', 250)
+                RETURNING *;
+            """, (email, name, hashed))
+            user_row = cursor.fetchone()
+            conn.commit()
     finally:
         cursor.close()
         conn.close()
 
-    if not row or not verify_password(user_data.password, row["hashed_password"]):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password"
-        )
+    user = dict(user_row)
+    if user.get("created_at"):
+        user["created_at"] = str(user["created_at"])
 
-    user = {
-        "id": row["id"],
-        "email": row["email"],
-        "full_name": row["full_name"],
-        "plan": row["plan"],
-        "credits": row["credits"],
-        "created_at": (
-            str(row["created_at"])
-            if row["created_at"]
-            else None
-        )
-    }
-
-    token = create_access_token(
-        {
-            "sub": user["email"],
-            "user_id": user["id"]
-        }
-    )
+    token = neon_token or create_access_token({"sub": user["email"], "user_id": user["id"]})
 
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": user
     }
+
+
+# -------------------------------------------------------------
+
+@app.post("/api/auth/logout")
+def logout_user(authorization: Optional[str] = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM neon_auth.session WHERE token = %s;', (token,))
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            cursor.close()
+            conn.close()
+    return {"status": "ok", "message": "Logged out successfully"}
 
 
 # -------------------------------------------------------------
@@ -283,19 +323,29 @@ def get_current_user_from_token(authorization: Optional[str]):
         )
 
     token = authorization.split(" ")[1]
-    payload = decode_access_token(token)
-
-    if not payload:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token"
-        )
-
-    email = payload.get("sub")
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    email = None
+
     try:
+        # 1. Check Neon Auth session
+        neon_sess = verify_neon_session(token, cursor)
+        if neon_sess:
+            email = neon_sess["email"].lower().strip()
+        else:
+            # 2. Check legacy JWT
+            payload = decode_access_token(token)
+            if payload:
+                email = payload.get("sub", "").lower().strip()
+
+        if not email:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or expired session token"
+            )
+
+        # 3. Retrieve user from public.users
         cursor.execute(
             """
             SELECT id, email, full_name, plan, credits, phone, bio, location, 
@@ -312,21 +362,26 @@ def get_current_user_from_token(authorization: Optional[str]):
             (email,)
         )
         row = cursor.fetchone()
+
+        if not row:
+            name = neon_sess.get("name") if neon_sess else "User"
+            cursor.execute("""
+                INSERT INTO users (email, full_name, plan, credits)
+                VALUES (%s, %s, 'Pro', 250)
+                RETURNING *;
+            """, (email, name))
+            row = cursor.fetchone()
+            conn.commit()
+
+        user_dict = dict(row)
+        if user_dict.get("created_at"):
+            user_dict["created_at"] = str(user_dict["created_at"])
+
+        return user_dict
     finally:
         cursor.close()
         conn.close()
 
-    if not row:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found"
-        )
-
-    user_dict = dict(row)
-    if user_dict.get("created_at"):
-        user_dict["created_at"] = str(user_dict["created_at"])
-
-    return user_dict
 
 
 @app.get("/api/auth/me")
@@ -1870,8 +1925,787 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
     }
 
 
+# =============================================================
+# RESUME ANALYZER & ATS OPTIMIZER ENDPOINTS
+# =============================================================
+
+class ResumeJobMatchRequest(BaseModel):
+    resume_text: str
+    skills: List[str]
+    job_description: str
+
+
+class ResumeBulletImproveRequest(BaseModel):
+    bullet_text: str
+    target_role: Optional[str] = None
+    domain_filter: Optional[str] = None
+
+
+class ResumeTargetMatchRequest(BaseModel):
+    analysis_id: Optional[int] = None
+    skills: List[str] = []
+    target_company: str = "TCS"
+    target_role: str = "Software Engineer"
+
+
+@app.get("/api/resume/companies-roles")
+def get_resume_companies_roles():
+    """
+    Returns unique companies and roles from company_role_requirements.json.
+    """
+    return get_available_companies_and_roles()
+
+
+@app.post("/api/resume/analyze")
+async def analyze_resume_file(
+    file: UploadFile = File(...),
+    company: Optional[str] = Form(None),
+    target_company: Optional[str] = Form(None),
+    role: Optional[str] = Form(None),
+    target_role: Optional[str] = Form(None),
+    job_description: Optional[str] = Form(None),
+    user_id: Optional[int] = Form(1)
+):
+    """
+    Accepts PDF or DOCX resume, validates file, performs comprehensive analysis,
+    persists result in Neon DB, and returns full analysis payload.
+    """
+    # 1. Validation
+    filename = file.filename or "resume.pdf"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in [".pdf", ".docx"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Please upload a valid .pdf or .docx document."
+        )
+
+    file_bytes = await file.read()
+    max_size = 10 * 1024 * 1024 # 10MB
+    if len(file_bytes) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail="File size exceeds maximum allowed limit (10MB)."
+        )
+
+    if len(file_bytes) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is empty. Please upload a valid resume."
+        )
+
+    try:
+        chosen_company = target_company or company or "TCS"
+        chosen_role = target_role or role or "Software Engineer"
+        analysis = full_resume_analysis(
+            file_bytes=file_bytes,
+            filename=filename,
+            target_company=chosen_company,
+            target_role=chosen_role,
+            job_description=job_description
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Resume analysis failed: {str(e)}")
+
+    # 2. Persist to Neon DB
+    analysis_id = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO resume_analyses 
+            (user_id, file_name, file_size, overall_score, readiness_level, scores,
+             skills_categorized, structure, strengths, issues, missing_keywords,
+             matched_keywords, bullet_improvements, formatting_checks, recommendations,
+             target_company, target_role, company_match, job_match)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                user_id or 1,
+                analysis["file_name"],
+                analysis["file_size"],
+                analysis["overall_score"],
+                analysis["readiness_level"],
+                json.dumps(analysis["scores"]),
+                json.dumps(analysis["skills_categorized"]),
+                json.dumps(analysis["structure"]),
+                json.dumps(analysis["strengths"]),
+                json.dumps(analysis["issues"]),
+                json.dumps(analysis["missing_keywords"]),
+                json.dumps(analysis["matched_keywords"]),
+                json.dumps(analysis["bullet_improvements"]),
+                json.dumps(analysis["formatting_checks"]),
+                json.dumps(analysis["recommendations"]),
+                analysis["target_company"],
+                analysis["target_role"],
+                json.dumps(analysis["company_match"]),
+                json.dumps(analysis["job_match"])
+            )
+        )
+        row = cursor.fetchone()
+        if row:
+            analysis_id = row["id"]
+        conn.commit()
+    except Exception as dbe:
+        print(f"[WARN] Failed to persist resume analysis: {dbe}")
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+    analysis["id"] = analysis_id
+    return analysis
+
+
+@app.post("/api/resume/job-match")
+def analyze_job_match(payload: ResumeJobMatchRequest):
+    """
+    Re-evaluates an existing resume text/skills against a newly pasted job description.
+    """
+    res = match_job_description(payload.resume_text, payload.skills, payload.job_description)
+    return res
+
+
+@app.post("/api/resume/target-match")
+def reevaluate_target_match(payload: ResumeTargetMatchRequest):
+    """
+    Recalculates target company and role skill match dynamically when user selects a new company/role.
+    """
+    company_match = match_company_and_role(
+        extracted_skills_flat=payload.skills,
+        company_name=payload.target_company,
+        role_name=payload.target_role
+    )
+    prep_integration = map_roadmaps_and_dsa(
+        missing_skills=company_match.get("missing_skills", []),
+        dsa_topics=company_match.get("dsa_topics", []),
+        company_name=company_match.get("company", payload.target_company)
+    )
+
+    if payload.analysis_id:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE resume_analyses
+                SET target_company = %s,
+                    target_role = %s,
+                    company_match = %s
+                WHERE id = %s;
+                """,
+                (
+                    payload.target_company,
+                    payload.target_role,
+                    json.dumps(company_match),
+                    payload.analysis_id
+                )
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"[WARN] Failed to update target match in DB: {e}")
+
+    return {
+        "target_company": payload.target_company,
+        "target_role": payload.target_role,
+        "company_match": company_match,
+        "roadmap_recommendations": prep_integration.get("recommended_roadmaps", []),
+        "dsa_recommendations": prep_integration.get("dsa_recommendations", []),
+    }
+
+
+
+@app.post("/api/resume/improve-bullet")
+def improve_single_bullet(payload: ResumeBulletImproveRequest):
+    """
+    Suggests action verbs and quantifiable rewrites for a single bullet point.
+    """
+    text = payload.bullet_text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Bullet text cannot be empty")
+    enhanced = enhance_single_bullet(
+        bullet=text,
+        target_role=payload.target_role,
+        domain_filter=payload.domain_filter
+    )
+    if not enhanced:
+        enhanced_list = improve_bullet_points(text)
+        enhanced = enhanced_list[0] if enhanced_list else None
+        if not enhanced:
+            raise HTTPException(status_code=400, detail="Could not process bullet point")
+    return {"suggestions": [enhanced], "enhanced": enhanced}
+
+
+@app.get("/api/resume/latest")
+def get_latest_resume_analysis(user_id: Optional[int] = 1):
+    """
+    Returns the most recent resume analysis for the user.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT * FROM resume_analyses
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1;
+            """,
+            (user_id or 1,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {"analysis": None}
+
+        prep_map = map_roadmaps_and_dsa(
+            row["missing_keywords"] or [],
+            (row["company_match"] or {}).get("dsa_topics", []),
+            row["target_company"] or "TCS"
+        )
+
+        return {
+            "analysis": {
+                "id": row["id"],
+                "file_name": row["file_name"],
+                "file_size": row["file_size"],
+                "overall_score": row["overall_score"],
+                "readiness_level": row["readiness_level"],
+                "scores": row["scores"],
+                "skills_categorized": row["skills_categorized"],
+                "structure": row["structure"],
+                "strengths": row["strengths"],
+                "issues": row["issues"],
+                "missing_keywords": row["missing_keywords"],
+                "matched_keywords": row["matched_keywords"],
+                "bullet_improvements": row["bullet_improvements"],
+                "formatting_checks": row["formatting_checks"],
+                "recommendations": row["recommendations"],
+                "target_company": row["target_company"],
+                "target_role": row["target_role"],
+                "company_match": row["company_match"],
+                "job_match": row["job_match"],
+                "roadmap_recommendations": prep_map.get("recommended_roadmaps", []),
+                "dsa_recommendations": prep_map.get("dsa_recommendations", []),
+                "created_at": str(row["created_at"])
+            }
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/resume/report/{analysis_id}")
+def get_resume_report(analysis_id: int):
+    """
+    Returns a formatted downloadable report payload for a specific analysis.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM resume_analyses WHERE id = %s;", (analysis_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Analysis report not found")
+
+        report_payload = {
+            "id": row["id"],
+            "file_name": row["file_name"],
+            "date": str(row["created_at"]),
+            "overall_score": row["overall_score"],
+            "readiness_level": row["readiness_level"],
+            "scores": row["scores"],
+            "skills": row["skills_categorized"],
+            "structure": row["structure"],
+            "strengths": row["strengths"],
+            "issues": row["issues"],
+            "missing_keywords": row["missing_keywords"],
+            "matched_keywords": row["matched_keywords"],
+            "company_match": row["company_match"],
+            "job_match": row["job_match"],
+            "recommendations": row["recommendations"]
+        }
+        return report_payload
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# -------------------------------------------------------------
+# Roadmap Endpoints
+# -------------------------------------------------------------
+
+def resolve_roadmap_user_id(authorization: Optional[str] = None, user_id_param: Optional[int] = None) -> int:
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            token = authorization.split(" ")[1]
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            try:
+                neon_sess = verify_neon_session(token, cursor)
+                if neon_sess:
+                    cursor.execute("SELECT id FROM users WHERE email = %s;", (neon_sess["email"],))
+                    u = cursor.fetchone()
+                    if u:
+                        return u["id"]
+                payload = decode_access_token(token)
+                if payload and "user_id" in payload:
+                    return int(payload["user_id"])
+            finally:
+                cursor.close()
+                conn.close()
+        except Exception:
+            pass
+    if user_id_param:
+        return user_id_param
+    return 1
+
+
+
+@app.get("/api/roadmap/domains")
+def get_roadmap_domains(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Fetch domains
+        cursor.execute("""
+            SELECT id, name, description, difficulty, estimated_weeks, display_order, icon_name
+            FROM roadmap_domains
+            ORDER BY display_order ASC;
+        """)
+        domains = cursor.fetchall()
+
+        # Fetch topic counts and completed counts per domain for user
+        cursor.execute("""
+            SELECT 
+                t.domain_id,
+                COUNT(t.id) AS total_topics,
+                COUNT(p.topic_id) FILTER (WHERE p.status = 'completed') AS completed_topics
+            FROM roadmap_topics t
+            LEFT JOIN user_roadmap_progress p 
+                ON t.id = p.topic_id AND p.user_id = %s AND p.status = 'completed'
+            GROUP BY t.domain_id;
+        """, (uid,))
+        progress_rows = {row["domain_id"]: row for row in cursor.fetchall()}
+
+        domain_results = []
+        overall_total = 0
+        overall_completed = 0
+
+        for d in domains:
+            d_id = d["id"]
+            p_data = progress_rows.get(d_id, {"total_topics": 0, "completed_topics": 0})
+            total = p_data["total_topics"]
+            completed = p_data["completed_topics"]
+            overall_total += total
+            overall_completed += completed
+            pct = round((completed / total * 100)) if total > 0 else 0
+
+            domain_results.append({
+                "id": d["id"],
+                "name": d["name"],
+                "description": d["description"],
+                "difficulty": d["difficulty"],
+                "estimated_weeks": d["estimated_weeks"],
+                "display_order": d["display_order"],
+                "icon_name": d["icon_name"],
+                "total_topics": total,
+                "completed_topics": completed,
+                "progress_percentage": pct
+            })
+
+        overall_pct = round((overall_completed / overall_total * 100)) if overall_total > 0 else 0
+
+        return {
+            "domains": domain_results,
+            "overall": {
+                "total_topics": overall_total,
+                "completed_topics": overall_completed,
+                "progress_percentage": overall_pct
+            }
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/roadmap/domains/{domain_id}/topics")
+def get_roadmap_domain_topics(
+    domain_id: str,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Verify domain exists
+        cursor.execute("SELECT * FROM roadmap_domains WHERE id = %s;", (domain_id,))
+        domain = cursor.fetchone()
+        if not domain:
+            raise HTTPException(status_code=404, detail="Domain not found")
+
+        # Get topics with user completion status
+        cursor.execute("""
+            SELECT 
+                t.id, t.domain_id, t.slug, t.title, t.description, 
+                t.difficulty, t.estimated_hours, t.display_order,
+                CASE WHEN p.status = 'completed' THEN true ELSE false END AS completed,
+                p.completed_at
+            FROM roadmap_topics t
+            LEFT JOIN user_roadmap_progress p 
+                ON t.id = p.topic_id AND p.user_id = %s AND p.status = 'completed'
+            WHERE t.domain_id = %s
+            ORDER BY t.display_order ASC;
+        """, (uid, domain_id))
+        topics = cursor.fetchall()
+
+        # Compute sequential unlock status:
+        # Topic 1 is always unlocked. Topic N is unlocked if Topic N-1 is completed.
+        enriched_topics = []
+        prev_completed = True
+        for idx, top in enumerate(topics):
+            is_completed = bool(top["completed"])
+            is_unlocked = prev_completed or idx == 0
+            enriched_topics.append({
+                "id": top["id"],
+                "domain_id": top["domain_id"],
+                "slug": top["slug"],
+                "title": top["title"],
+                "description": top["description"],
+                "difficulty": top["difficulty"],
+                "estimated_hours": top["estimated_hours"],
+                "display_order": top["display_order"],
+                "completed": is_completed,
+                "unlocked": is_unlocked,
+                "completed_at": str(top["completed_at"]) if top.get("completed_at") else None
+            })
+            prev_completed = is_completed
+
+        # Get domain mini project
+        cursor.execute("SELECT * FROM roadmap_projects WHERE domain_id = %s LIMIT 1;", (domain_id,))
+        project = cursor.fetchone()
+
+        return {
+            "domain": dict(domain),
+            "topics": enriched_topics,
+            "project": dict(project) if project else None
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/roadmap/topics/{topic_id}")
+def get_roadmap_topic_detail(
+    topic_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Fetch topic
+        cursor.execute("SELECT * FROM roadmap_topics WHERE id = %s;", (topic_id,))
+        topic = cursor.fetchone()
+        if not topic:
+            raise HTTPException(status_code=404, detail="Topic not found")
+
+        # Check completion status
+        cursor.execute("""
+            SELECT status, completed_at FROM user_roadmap_progress 
+            WHERE topic_id = %s AND user_id = %s;
+        """, (topic_id, uid))
+        prog = cursor.fetchone()
+        is_completed = bool(prog and prog["status"] == "completed")
+
+        # Fetch resources
+        cursor.execute("""
+            SELECT id, resource_type, title, provider, url, is_free, display_order
+            FROM roadmap_resources
+            WHERE topic_id = %s
+            ORDER BY display_order ASC;
+        """, (topic_id,))
+        resources = cursor.fetchall()
+
+        # Fetch practice tasks
+        cursor.execute("""
+            SELECT id, title, description, difficulty, hint, display_order
+            FROM roadmap_practice_tasks
+            WHERE topic_id = %s
+            ORDER BY display_order ASC;
+        """, (topic_id,))
+        tasks = cursor.fetchall()
+
+        # Fetch domain project
+        cursor.execute("""
+            SELECT * FROM roadmap_projects WHERE domain_id = %s LIMIT 1;
+        """, (topic["domain_id"],))
+        project = cursor.fetchone()
+
+        # Relevant DSA problems mapping if applicable
+        dsa_keywords = {
+            "arrays-strings": ["Array", "String", "Two Pointers"],
+            "linked-lists": ["Linked List"],
+            "stack-queue": ["Stack", "Queue"],
+            "hashing-searching": ["Hash Table", "Binary Search"],
+            "trees-graphs": ["Tree", "Binary Tree", "Graph"],
+            "sorting-dynamic-programming": ["Dynamic Programming", "Sorting"]
+        }
+        slug = topic["slug"]
+        dsa_problems = []
+        if slug in dsa_keywords:
+            tags = dsa_keywords[slug]
+            cursor.execute("""
+                SELECT id, title, slug, difficulty, acceptance_rate, link, topics
+                FROM dsa_problems
+                WHERE topics && %s::text[]
+                ORDER BY id ASC
+                LIMIT 4;
+            """, (tags,))
+            dsa_problems = cursor.fetchall()
+
+        return {
+            "topic": {
+                "id": topic["id"],
+                "domain_id": topic["domain_id"],
+                "slug": topic["slug"],
+                "title": topic["title"],
+                "description": topic["description"],
+                "difficulty": topic["difficulty"],
+                "estimated_hours": topic["estimated_hours"],
+                "display_order": topic["display_order"],
+                "explanation": topic["explanation"],
+                "key_points": topic["key_points"] if isinstance(topic["key_points"], list) else json.loads(topic["key_points"] or "[]"),
+                "code_example": topic["code_example"],
+                "quiz": topic["quiz"] if isinstance(topic["quiz"], dict) else json.loads(topic["quiz"] or "{}"),
+                "is_completed": is_completed,
+                "completed_at": str(prog["completed_at"]) if prog and prog.get("completed_at") else None
+            },
+            "resources": [dict(r) for r in resources],
+            "practice_tasks": [dict(t) for t in tasks],
+            "mini_project": dict(project) if project else None,
+            "dsa_problems": [dict(p) for p in dsa_problems]
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/roadmap/progress")
+def update_roadmap_progress(
+    req: RoadmapProgressRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_roadmap_user_id(authorization, req.user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Check topic exists
+        cursor.execute("SELECT id, domain_id FROM roadmap_topics WHERE id = %s;", (req.topic_id,))
+        topic = cursor.fetchone()
+        if not topic:
+            raise HTTPException(status_code=404, detail="Topic not found")
+
+        status = req.status.lower().strip()
+        if status == "completed":
+            cursor.execute("""
+                INSERT INTO user_roadmap_progress (user_id, topic_id, status, completed_at, updated_at)
+                VALUES (%s, %s, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (user_id, topic_id) DO UPDATE SET
+                    status = 'completed',
+                    completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP;
+            """, (uid, req.topic_id))
+        else:
+            cursor.execute("""
+                DELETE FROM user_roadmap_progress 
+                WHERE user_id = %s AND topic_id = %s;
+            """, (uid, req.topic_id))
+
+        conn.commit()
+
+        # Return updated domain progress
+        cursor.execute("""
+            SELECT 
+                COUNT(t.id) AS total_topics,
+                COUNT(p.topic_id) FILTER (WHERE p.status = 'completed') AS completed_topics
+            FROM roadmap_topics t
+            LEFT JOIN user_roadmap_progress p 
+                ON t.id = p.topic_id AND p.user_id = %s AND p.status = 'completed'
+            WHERE t.domain_id = %s;
+        """, (uid, topic["domain_id"]))
+        domain_stats = cursor.fetchone()
+        d_total = domain_stats["total_topics"]
+        d_completed = domain_stats["completed_topics"]
+        d_pct = round((d_completed / d_total * 100)) if d_total > 0 else 0
+
+        # Return updated overall progress
+        cursor.execute("""
+            SELECT 
+                COUNT(t.id) AS total_topics,
+                COUNT(p.topic_id) FILTER (WHERE p.status = 'completed') AS completed_topics
+            FROM roadmap_topics t
+            LEFT JOIN user_roadmap_progress p 
+                ON t.id = p.topic_id AND p.user_id = %s AND p.status = 'completed';
+        """, (uid,))
+        overall_stats = cursor.fetchone()
+        o_total = overall_stats["total_topics"]
+        o_completed = overall_stats["completed_topics"]
+        o_pct = round((o_completed / o_total * 100)) if o_total > 0 else 0
+
+        return {
+            "success": True,
+            "topic_id": req.topic_id,
+            "domain_id": topic["domain_id"],
+            "status": status,
+            "domain_completed": d_completed,
+            "domain_total": d_total,
+            "domain_progress_percentage": d_pct,
+            "overall_completed": o_completed,
+            "overall_total": o_total,
+            "overall_progress_percentage": o_pct
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/roadmap/progress/reset")
+def reset_roadmap_progress(
+    req: RoadmapResetRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_roadmap_user_id(authorization, req.user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if req.domain_id:
+            cursor.execute("""
+                DELETE FROM user_roadmap_progress
+                WHERE user_id = %s AND topic_id IN (
+                    SELECT id FROM roadmap_topics WHERE domain_id = %s
+                );
+            """, (uid, req.domain_id))
+        else:
+            cursor.execute("DELETE FROM user_roadmap_progress WHERE user_id = %s;", (uid,))
+
+        conn.commit()
+        return {"success": True, "message": "Roadmap progress reset successfully"}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/roadmap/recommendations")
+def get_roadmap_recommendations(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Check latest resume analysis
+        cursor.execute("""
+            SELECT missing_keywords, target_company, target_role
+            FROM resume_analyses
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1;
+        """, (uid,))
+        analysis = cursor.fetchone()
+
+        missing_skills = []
+        target_role = "Software Engineer"
+        target_company = None
+
+        if analysis:
+            missing_skills = analysis.get("missing_keywords") or []
+            target_role = analysis.get("target_role") or "Software Engineer"
+            target_company = analysis.get("target_company")
+
+        recommendations = []
+        matched_topic_ids = set()
+
+        if missing_skills:
+            for skill in missing_skills[:6]:
+                cursor.execute("""
+                    SELECT t.id, t.domain_id, t.title, t.difficulty, d.name as domain_name
+                    FROM roadmap_topics t
+                    JOIN roadmap_domains d ON t.domain_id = d.id
+                    WHERE t.title ILIKE %s OR t.description ILIKE %s OR t.slug ILIKE %s
+                    LIMIT 2;
+                """, (f"%{skill}%", f"%{skill}%", f"%{skill}%"))
+                matches = cursor.fetchall()
+                for m in matches:
+                    if m["id"] not in matched_topic_ids:
+                        matched_topic_ids.add(m["id"])
+                        recommendations.append({
+                            "topic_id": m["id"],
+                            "domain_id": m["domain_id"],
+                            "domain_name": m["domain_name"],
+                            "title": m["title"],
+                            "difficulty": m["difficulty"],
+                            "matched_skill": skill,
+                            "reason": f"Bridge skill gap identified in your resume analysis for {target_role}"
+                        })
+
+        # If no resume scans or fewer than 3 matches, add foundational high-value topics
+        if len(recommendations) < 3:
+            cursor.execute("""
+                SELECT t.id, t.domain_id, t.title, t.difficulty, d.name as domain_name
+                FROM roadmap_topics t
+                JOIN roadmap_domains d ON t.domain_id = d.id
+                WHERE t.slug IN ('arrays-strings', 'rest-apis', 'sql-fundamentals', 'git-basics')
+                ORDER BY t.id ASC
+                LIMIT 4;
+            """)
+            defaults = cursor.fetchall()
+            for d in defaults:
+                if d["id"] not in matched_topic_ids:
+                    matched_topic_ids.add(d["id"])
+                    recommendations.append({
+                        "topic_id": d["id"],
+                        "domain_id": d["domain_id"],
+                        "domain_name": d["domain_name"],
+                        "title": d["title"],
+                        "difficulty": d["difficulty"],
+                        "matched_skill": "Core Foundation",
+                        "reason": "Essential foundation topic recommended for tech placements"
+                    })
+
+        return {
+            "has_resume_scan": bool(analysis),
+            "target_role": target_role,
+            "target_company": target_company,
+            "recommendations": recommendations[:5]
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
 
 

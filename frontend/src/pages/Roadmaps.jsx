@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
 import {
@@ -23,1702 +24,813 @@ import {
   X,
   Lightbulb,
   ArrowRight,
+  ExternalLink,
+  Sparkles,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  FolderGit2,
+  Layers,
+  HelpCircle,
+  CheckSquare,
+  Square,
+  Loader2,
+  AlertCircle
 } from "lucide-react";
 
-/* =========================================================
-   ROADMAP DATA
-========================================================= */
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-const ROADMAP_DATA = [
-  {
-    id: "fundamentals",
-    title: "Programming Fundamentals",
-    description:
-      "Build a strong foundation in programming and problem solving.",
-    icon: Code2,
-    duration: "2-3 weeks",
-    level: "Beginner",
-    topics: [
-      "Variables & Data Types",
-      "Conditions & Loops",
-      "Functions",
-      "Arrays & Strings",
-      "Object-Oriented Programming",
-    ],
-  },
-
-  {
-    id: "web",
-    title: "Web Development",
-    description:
-      "Learn the technologies required to build modern web applications.",
-    icon: Globe,
-    duration: "3-4 weeks",
-    level: "Beginner",
-    topics: [
-      "HTML & CSS",
-      "JavaScript",
-      "DOM Manipulation",
-      "React Basics",
-      "REST APIs",
-    ],
-  },
-
-  {
-    id: "dsa",
-    title: "Data Structures & Algorithms",
-    description:
-      "Master the core DSA concepts required for coding interviews.",
-    icon: BrainCircuit,
-    duration: "6-8 weeks",
-    level: "Intermediate",
-    topics: [
-      "Arrays & Strings",
-      "Linked Lists",
-      "Stacks & Queues",
-      "Trees & Graphs",
-      "Sorting & Searching",
-      "Dynamic Programming",
-    ],
-  },
-
-  {
-    id: "database",
-    title: "Database & DBMS",
-    description:
-      "Understand how applications store, retrieve and manage data.",
-    icon: Database,
-    duration: "2-3 weeks",
-    level: "Intermediate",
-    topics: [
-      "SQL Basics",
-      "Joins",
-      "Normalization",
-      "Transactions",
-      "Indexes",
-    ],
-  },
-
-  {
-    id: "backend",
-    title: "Backend Development",
-    description:
-      "Build APIs and understand server-side application development.",
-    icon: Server,
-    duration: "3-4 weeks",
-    level: "Intermediate",
-    topics: [
-      "Node.js / Python",
-      "REST API",
-      "Authentication",
-      "Database Integration",
-      "API Security",
-    ],
-  },
-
-  {
-    id: "tools",
-    title: "Git & Development Tools",
-    description:
-      "Learn the tools used in real-world software development.",
-    icon: GitBranch,
-    duration: "1 week",
-    level: "Beginner",
-    topics: [
-      "Git Basics",
-      "Branches",
-      "Merge & Pull Requests",
-      "GitHub",
-    ],
-  },
-
-  {
-    id: "interview",
-    title: "Interview Preparation",
-    description:
-      "Prepare for technical and behavioral interviews.",
-    icon: Briefcase,
-    duration: "3-4 weeks",
-    level: "Advanced",
-    topics: [
-      "Resume Preparation",
-      "Technical Interviews",
-      "HR Questions",
-      "Mock Interviews",
-      "Company Preparation",
-    ],
-  },
-];
-
-/* =========================================================
-   TOPIC CONTENT
-========================================================= */
-
-const TOPIC_CONTENT = {
-  "Variables & Data Types": {
-    explanation:
-      "Variables are named storage locations used to hold data. A data type describes what kind of value a variable contains.",
-    points: [
-      "Variables store values that can be used later.",
-      "Common types include string, number, boolean, array and object.",
-      "Choose meaningful variable names.",
-      "The type of data determines what operations can be performed.",
-    ],
-    example:
-      "let age = 21;\nlet name = 'Vivek';\nlet isStudent = true;",
-    question:
-      "Which data type represents true or false?",
-    options: [
-      "String",
-      "Boolean",
-      "Number",
-      "Array",
-    ],
-    answer: 1,
-  },
-
-  "Conditions & Loops": {
-    explanation:
-      "Conditions allow programs to make decisions, while loops allow a block of code to execute repeatedly.",
-    points: [
-      "if/else is used for decision making.",
-      "for loops are useful when the number of iterations is known.",
-      "while loops continue while a condition remains true.",
-      "Avoid infinite loops by updating the loop condition.",
-    ],
-    example:
-      "if (age >= 18) {\n  console.log('Adult');\n}",
-    question:
-      "Which statement is commonly used to make a decision?",
-    options: [
-      "if",
-      "import",
-      "return",
-      "class",
-    ],
-    answer: 0,
-  },
-
-  Functions: {
-    explanation:
-      "A function is a reusable block of code designed to perform a particular task.",
-    points: [
-      "Functions reduce code duplication.",
-      "They can accept parameters.",
-      "They can return a value.",
-      "Functions improve code organization and readability.",
-    ],
-    example:
-      "function add(a, b) {\n  return a + b;\n}",
-    question:
-      "What keyword is commonly used to define a function in JavaScript?",
-    options: [
-      "function",
-      "define",
-      "method",
-      "func",
-    ],
-    answer: 0,
-  },
-
-  "Arrays & Strings": {
-    explanation:
-      "Arrays store collections of values, while strings represent sequences of characters.",
-    points: [
-      "Array indexes usually start from 0.",
-      "Strings can be accessed character by character.",
-      "Arrays can store multiple values.",
-      "Common array operations include push, pop, map and filter.",
-    ],
-    example:
-      "const numbers = [10, 20, 30];\nconsole.log(numbers[0]);",
-    question:
-      "What is the index of the first element of a JavaScript array?",
-    options: [
-      "0",
-      "1",
-      "-1",
-      "10",
-    ],
-    answer: 0,
-  },
-
-  "Object-Oriented Programming": {
-    explanation:
-      "Object-oriented programming organizes software around objects that contain data and behavior.",
-    points: [
-      "Classes define the structure of objects.",
-      "Encapsulation groups data and methods.",
-      "Inheritance allows reuse of existing behavior.",
-      "Polymorphism allows different implementations of a common interface.",
-    ],
-    example:
-      "class Student {\n  constructor(name) {\n    this.name = name;\n  }\n}",
-    question:
-      "Which OOP concept allows a class to acquire properties from another class?",
-    options: [
-      "Encapsulation",
-      "Inheritance",
-      "Compilation",
-      "Iteration",
-    ],
-    answer: 1,
-  },
-
-  "HTML & CSS": {
-    explanation:
-      "HTML provides the structure of a webpage, while CSS controls its appearance and layout.",
-    points: [
-      "HTML uses elements and tags.",
-      "CSS controls colors, spacing and typography.",
-      "Flexbox and Grid are common CSS layout systems.",
-      "Semantic HTML improves accessibility.",
-    ],
-    example:
-      "<h1>Hello World</h1>\n<p>Welcome to PrepNest.</p>",
-    question:
-      "Which technology is primarily responsible for webpage styling?",
-    options: [
-      "HTML",
-      "CSS",
-      "SQL",
-      "Python",
-    ],
-    answer: 1,
-  },
-
-  JavaScript: {
-    explanation:
-      "JavaScript is a programming language commonly used to add behavior and interactivity to web applications.",
-    points: [
-      "JavaScript runs in browsers and other environments.",
-      "It supports functions, objects and asynchronous programming.",
-      "Modern JavaScript uses let and const.",
-      "It is the foundation of many frontend frameworks.",
-    ],
-    example:
-      "const message = 'Hello PrepNest';\nconsole.log(message);",
-    question:
-      "Which keyword declares a block-scoped constant?",
-    options: [
-      "var",
-      "constant",
-      "const",
-      "static",
-    ],
-    answer: 2,
-  },
-
-  "DOM Manipulation": {
-    explanation:
-      "The DOM represents a webpage as a tree of objects that JavaScript can read and modify.",
-    points: [
-      "document represents the webpage.",
-      "querySelector can select an element.",
-      "textContent can change text.",
-      "Event listeners respond to user actions.",
-    ],
-    example:
-      "const title = document.querySelector('h1');\ntitle.textContent = 'Welcome';",
-    question:
-      "Which method selects an element using a CSS selector?",
-    options: [
-      "querySelector",
-      "getCSS",
-      "selectElement",
-      "findNode",
-    ],
-    answer: 0,
-  },
-
-  "React Basics": {
-    explanation:
-      "React is a JavaScript library for building component-based user interfaces.",
-    points: [
-      "React applications are built from components.",
-      "Props pass data between components.",
-      "State stores changing data.",
-      "Hooks such as useState and useEffect are common in functional components.",
-    ],
-    example:
-      "function Welcome() {\n  return <h1>Hello!</h1>;\n}",
-    question:
-      "What is a React component primarily used to create?",
-    options: [
-      "Database tables",
-      "User interface",
-      "Operating systems",
-      "Network cables",
-    ],
-    answer: 1,
-  },
-
-  "REST APIs": {
-    explanation:
-      "REST APIs allow applications to communicate using HTTP requests and resources.",
-    points: [
-      "GET retrieves data.",
-      "POST creates data.",
-      "PUT/PATCH updates data.",
-      "DELETE removes data.",
-    ],
-    example:
-      "GET /api/users\nPOST /api/users",
-    question:
-      "Which HTTP method is commonly used to retrieve data?",
-    options: [
-      "GET",
-      "POST",
-      "DELETE",
-      "PATCH",
-    ],
-    answer: 0,
-  },
-
-  "Arrays & Strings": {
-    explanation:
-      "Arrays store collections of elements and strings store sequences of characters.",
-    points: [
-      "Arrays are frequently used in algorithm problems.",
-      "Strings can often be treated as character sequences.",
-      "Two-pointer techniques are common with arrays and strings.",
-      "Hash maps can improve lookup performance.",
-    ],
-    example:
-      "const arr = [1, 2, 3, 4];\nconst text = 'hello';",
-    question:
-      "What is the first index of a typical array?",
-    options: ["0", "1", "-1", "2"],
-    answer: 0,
-  },
-
-  "Linked Lists": {
-    explanation:
-      "A linked list is a linear data structure where nodes contain data and references to other nodes.",
-    points: [
-      "Each node stores data and a link.",
-      "A singly linked list points to the next node.",
-      "Insertion can be efficient when the position is known.",
-      "Random access is slower than arrays.",
-    ],
-    example:
-      "Node → Node → Node → null",
-    question:
-      "What does a linked-list node usually contain?",
-    options: [
-      "Only data",
-      "Data and a reference",
-      "Only an index",
-      "Only a key",
-    ],
-    answer: 1,
-  },
-
-  "Stacks & Queues": {
-    explanation:
-      "Stacks follow LIFO ordering, while queues follow FIFO ordering.",
-    points: [
-      "Stack: Last In, First Out.",
-      "Queue: First In, First Out.",
-      "Stacks are useful for recursion and undo operations.",
-      "Queues are useful for scheduling and BFS.",
-    ],
-    example:
-      "Stack: push(10) → push(20) → pop() returns 20",
-    question:
-      "Which principle does a stack follow?",
-    options: [
-      "FIFO",
-      "LIFO",
-      "Random",
-      "Priority only",
-    ],
-    answer: 1,
-  },
-
-  "Trees & Graphs": {
-    explanation:
-      "Trees and graphs are non-linear data structures used to represent hierarchical and connected data.",
-    points: [
-      "A tree has a hierarchical structure.",
-      "Graphs consist of vertices and edges.",
-      "DFS explores deeply before backtracking.",
-      "BFS explores level by level.",
-    ],
-    example:
-      "Tree:\n      A\n     / \\\n    B   C",
-    question:
-      "Which traversal explores a graph level by level?",
-    options: [
-      "DFS",
-      "BFS",
-      "Binary Search",
-      "Insertion Sort",
-    ],
-    answer: 1,
-  },
-
-  "Sorting & Searching": {
-    explanation:
-      "Sorting arranges data in an order, while searching finds a desired element.",
-    points: [
-      "Linear search checks elements sequentially.",
-      "Binary search requires sorted data.",
-      "Merge sort has O(n log n) time complexity.",
-      "Efficient searching can significantly improve performance.",
-    ],
-    example:
-      "Sorted array: [10, 20, 30, 40, 50]\nBinary search can find 40 efficiently.",
-    question:
-      "What condition is required for binary search?",
-    options: [
-      "The data must be sorted",
-      "The data must be random",
-      "The array must contain strings",
-      "The array must have duplicates",
-    ],
-    answer: 0,
-  },
-
-  "Dynamic Programming": {
-    explanation:
-      "Dynamic programming solves problems by breaking them into overlapping subproblems and storing previous results.",
-    points: [
-      "It is useful when subproblems overlap.",
-      "Memoization uses top-down caching.",
-      "Tabulation uses a bottom-up table.",
-      "DP can reduce repeated computation.",
-    ],
-    example:
-      "Fibonacci can be optimized by storing previously calculated values.",
-    question:
-      "What is commonly stored in dynamic programming?",
-    options: [
-      "Previous subproblem results",
-      "Only input strings",
-      "HTML elements",
-      "Network packets",
-    ],
-    answer: 0,
-  },
-
-  "SQL Basics": {
-    explanation:
-      "SQL is used to communicate with relational databases and perform operations on stored data.",
-    points: [
-      "SELECT retrieves data.",
-      "INSERT adds records.",
-      "UPDATE modifies records.",
-      "DELETE removes records.",
-    ],
-    example:
-      "SELECT name FROM students WHERE marks > 80;",
-    question:
-      "Which SQL command retrieves data?",
-    options: [
-      "SELECT",
-      "INSERT",
-      "UPDATE",
-      "DELETE",
-    ],
-    answer: 0,
-  },
-
-  Joins: {
-    explanation:
-      "SQL joins combine related data from multiple tables.",
-    points: [
-      "INNER JOIN returns matching records.",
-      "LEFT JOIN keeps all records from the left table.",
-      "RIGHT JOIN keeps all records from the right table.",
-      "Joins commonly use related keys.",
-    ],
-    example:
-      "SELECT * FROM students\nINNER JOIN departments\nON students.dept_id = departments.id;",
-    question:
-      "Which join returns matching records from both tables?",
-    options: [
-      "INNER JOIN",
-      "LEFT JOIN",
-      "CROSS JOIN",
-      "FULL DELETE",
-    ],
-    answer: 0,
-  },
-
-  Normalization: {
-    explanation:
-      "Database normalization organizes data to reduce redundancy and improve consistency.",
-    points: [
-      "Normalization reduces duplicate data.",
-      "1NF requires atomic values.",
-      "2NF removes partial dependencies.",
-      "3NF removes transitive dependencies.",
-    ],
-    example:
-      "Instead of storing department information repeatedly for every employee, store it in a separate department table.",
-    question:
-      "What is a major goal of normalization?",
-    options: [
-      "Increase redundancy",
-      "Reduce redundancy",
-      "Delete all tables",
-      "Remove primary keys",
-    ],
-    answer: 1,
-  },
-
-  Transactions: {
-    explanation:
-      "A database transaction is a sequence of operations treated as a single logical unit.",
-    points: [
-      "ACID properties describe reliable transactions.",
-      "Atomicity means all-or-nothing.",
-      "Consistency maintains valid database state.",
-      "Isolation controls interaction between transactions.",
-    ],
-    example:
-      "Transfer ₹100:\nDebit account A → Credit account B\nBoth should succeed or both should fail.",
-    question:
-      "What does atomicity mean?",
-    options: [
-      "All operations succeed or none do",
-      "Data is always encrypted",
-      "Queries are always fast",
-      "Tables cannot be changed",
-    ],
-    answer: 0,
-  },
-
-  Indexes: {
-    explanation:
-      "Database indexes improve the speed of data retrieval by providing an efficient lookup structure.",
-    points: [
-      "Indexes can speed up SELECT queries.",
-      "They require additional storage.",
-      "Too many indexes can slow INSERT and UPDATE operations.",
-      "Indexes are commonly created on frequently searched columns.",
-    ],
-    example:
-      "CREATE INDEX idx_email ON users(email);",
-    question:
-      "What is the main purpose of a database index?",
-    options: [
-      "Speed up data retrieval",
-      "Delete data",
-      "Encrypt passwords",
-      "Create APIs",
-    ],
-    answer: 0,
-  },
-
-  "Node.js / Python": {
-    explanation:
-      "Node.js and Python are commonly used for backend development. Node.js uses JavaScript while Python is a general-purpose language.",
-    points: [
-      "Node.js allows JavaScript to run outside the browser.",
-      "Python is widely used for web development and AI.",
-      "Both can build APIs.",
-      "Both have large package ecosystems.",
-    ],
-    example:
-      "Node.js: Express\nPython: FastAPI / Django",
-    question:
-      "Which technology allows JavaScript to run on the server?",
-    options: [
-      "Node.js",
-      "HTML",
-      "CSS",
-      "SQL",
-    ],
-    answer: 0,
-  },
-
-  "REST API": {
-    explanation:
-      "A REST API exposes application resources through HTTP endpoints.",
-    points: [
-      "Resources are represented using URLs.",
-      "HTTP methods define operations.",
-      "JSON is commonly used for data exchange.",
-      "APIs separate clients from backend logic.",
-    ],
-    example:
-      "GET /users/10\nreturns information about user 10.",
-    question:
-      "What is commonly exchanged by REST APIs?",
-    options: [
-      "JSON",
-      "CSS only",
-      "Images only",
-      "Machine code only",
-    ],
-    answer: 0,
-  },
-
-  Authentication: {
-    explanation:
-      "Authentication verifies who a user is before granting access to protected resources.",
-    points: [
-      "Passwords can be used for authentication.",
-      "Tokens are commonly used in APIs.",
-      "Authentication answers 'Who are you?'",
-      "It is different from authorization.",
-    ],
-    example:
-      "User logs in with email and password → server verifies identity.",
-    question:
-      "What does authentication verify?",
-    options: [
-      "User identity",
-      "CSS styling",
-      "Database size",
-      "Screen resolution",
-    ],
-    answer: 0,
-  },
-
-  "Database Integration": {
-    explanation:
-      "Database integration connects backend applications to databases so they can store and retrieve persistent data.",
-    points: [
-      "Applications can use SQL or ORM tools.",
-      "Connections should be managed safely.",
-      "Credentials should not be hardcoded.",
-      "Queries should be protected from injection.",
-    ],
-    example:
-      "Backend API → Database connection → SQL query → Response",
-    question:
-      "Why does a backend integrate with a database?",
-    options: [
-      "To persist application data",
-      "To style pages",
-      "To render icons",
-      "To compile CSS",
-    ],
-    answer: 0,
-  },
-
-  "API Security": {
-    explanation:
-      "API security protects endpoints and data from unauthorized access and malicious requests.",
-    points: [
-      "Use authentication and authorization.",
-      "Validate incoming input.",
-      "Use HTTPS.",
-      "Protect sensitive information.",
-      "Rate limiting can reduce abuse.",
-    ],
-    example:
-      "Authorization middleware checks whether a logged-in user can access /admin.",
-    question:
-      "Which protocol protects HTTP traffic using encryption?",
-    options: [
-      "HTTPS",
-      "FTP",
-      "SMTP",
-      "HTTP only",
-    ],
-    answer: 0,
-  },
-
-  "Git Basics": {
-    explanation:
-      "Git is a distributed version control system used to track changes in source code.",
-    points: [
-      "git init creates a repository.",
-      "git add stages changes.",
-      "git commit records changes.",
-      "git status shows the working tree state.",
-    ],
-    example:
-      "git add .\ngit commit -m \"Add roadmap\"",
-    question:
-      "Which command creates a Git commit?",
-    options: [
-      "git commit",
-      "git save",
-      "git record",
-      "git push-only",
-    ],
-    answer: 0,
-  },
-
-  Branches: {
-    explanation:
-      "Git branches allow developers to work on different features independently.",
-    points: [
-      "Branches isolate work.",
-      "main usually contains stable shared code.",
-      "Feature branches are useful for new functionality.",
-      "Branches can later be merged.",
-    ],
-    example:
-      "git checkout -b vivek-roadmap",
-    question:
-      "Why are Git branches useful?",
-    options: [
-      "To isolate development work",
-      "To delete Git",
-      "To install Node",
-      "To run Python",
-    ],
-    answer: 0,
-  },
-
-  "Merge & Pull Requests": {
-    explanation:
-      "Merging combines changes from different branches. Pull Requests allow teams to review changes before merging.",
-    points: [
-      "A merge combines histories.",
-      "Pull Requests support code review.",
-      "Conflicts occur when changes overlap.",
-      "Teams can discuss changes before merging.",
-    ],
-    example:
-      "feature branch → Pull Request → review → main",
-    question:
-      "What is the purpose of a Pull Request?",
-    options: [
-      "Review and propose changes",
-      "Install dependencies",
-      "Delete a repository",
-      "Start a server",
-    ],
-    answer: 0,
-  },
-
-  GitHub: {
-    explanation:
-      "GitHub is a platform for hosting Git repositories and collaborating on software projects.",
-    points: [
-      "Repositories contain project source code.",
-      "Branches support parallel development.",
-      "Pull Requests support collaboration.",
-      "Issues can track bugs and tasks.",
-    ],
-    example:
-      "git push origin vivek-roadmap",
-    question:
-      "What is GitHub primarily used for?",
-    options: [
-      "Code hosting and collaboration",
-      "Only video editing",
-      "Only database storage",
-      "Operating system installation",
-    ],
-    answer: 0,
-  },
-
-  "Resume Preparation": {
-    explanation:
-      "A strong resume presents your skills, projects, education and achievements clearly and concisely.",
-    points: [
-      "Keep the resume focused and readable.",
-      "Use measurable project achievements.",
-      "Highlight relevant technical skills.",
-      "Customize the resume for the role.",
-    ],
-    example:
-      "Built a React + FastAPI interview platform used to practice technical interviews.",
-    question:
-      "What makes a project description stronger?",
-    options: [
-      "Measurable results",
-      "Long paragraphs",
-      "Unrelated hobbies",
-      "Generic statements",
-    ],
-    answer: 0,
-  },
-
-  "Technical Interviews": {
-    explanation:
-      "Technical interviews evaluate problem solving, programming fundamentals, system knowledge and communication.",
-    points: [
-      "Understand the problem before coding.",
-      "Explain your approach.",
-      "Discuss complexity.",
-      "Test your solution with examples.",
-    ],
-    example:
-      "Problem → Clarify → Approach → Code → Test → Complexity",
-    question:
-      "What should you usually do before coding an interview problem?",
-    options: [
-      "Understand and clarify the problem",
-      "Immediately write random code",
-      "Skip examples",
-      "Ignore constraints",
-    ],
-    answer: 0,
-  },
-
-  "HR Questions": {
-    explanation:
-      "HR interviews evaluate communication, motivation, teamwork, behavior and cultural fit.",
-    points: [
-      "Prepare a concise introduction.",
-      "Use examples from your experience.",
-      "Be honest and professional.",
-      "Use the STAR method for behavioral questions.",
-    ],
-    example:
-      "Situation → Task → Action → Result",
-    question:
-      "What does STAR stand for?",
-    options: [
-      "Situation, Task, Action, Result",
-      "Skill, Test, Answer, Review",
-      "System, Technology, API, React",
-      "Start, Try, Apply, Run",
-    ],
-    answer: 0,
-  },
-
-  "Mock Interviews": {
-    explanation:
-      "Mock interviews simulate real interviews so you can practice answering questions and improve confidence.",
-    points: [
-      "Practice speaking clearly.",
-      "Track repeated mistakes.",
-      "Review technical answers.",
-      "Practice time management.",
-    ],
-    example:
-      "Question → Answer → Feedback → Improvement → Repeat",
-    question:
-      "What is a major benefit of mock interviews?",
-    options: [
-      "Practice before the real interview",
-      "Avoid preparation",
-      "Guarantee a job",
-      "Replace all technical study",
-    ],
-    answer: 0,
-  },
-
-  "Company Preparation": {
-    explanation:
-      "Company preparation focuses your interview practice around a specific company's hiring process and expectations.",
-    points: [
-      "Research the company.",
-      "Understand the job description.",
-      "Practice common interview topics.",
-      "Prepare questions for the interviewer.",
-    ],
-    example:
-      "Company research → Role requirements → DSA → Technical → HR",
-    question:
-      "Why should you research a company before an interview?",
-    options: [
-      "To understand the role and company",
-      "To avoid preparing",
-      "To memorize random facts",
-      "To skip technical questions",
-    ],
-    answer: 0,
-  },
+// Icon mapping for roadmap domains
+const ICON_MAP = {
+  Code2: Code2,
+  Globe: Globe,
+  BrainCircuit: BrainCircuit,
+  Database: Database,
+  Server: Server,
+  GitBranch: GitBranch,
+  Briefcase: Briefcase,
 };
 
-/* =========================================================
-   LOCAL STORAGE
-========================================================= */
-
-const STORAGE_KEY = "prepnest-roadmap-progress";
-
-/* =========================================================
-   MAIN COMPONENT
-========================================================= */
-
 export default function RoadmapsPage() {
-  const [completedTopics, setCompletedTopics] =
-    useState(() => {
-      try {
-        const saved =
-          localStorage.getItem(STORAGE_KEY);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-        return saved
-          ? JSON.parse(saved)
-          : {};
-      } catch {
-        return {};
-      }
-    });
+  // Domains & Overall Stats
+  const [domains, setDomains] = useState([]);
+  const [overallStats, setOverallStats] = useState({
+    total_topics: 35,
+    completed_topics: 0,
+    progress_percentage: 0,
+  });
+  const [selectedDomainIndex, setSelectedDomainIndex] = useState(0);
 
-  const [selectedRoadmap, setSelectedRoadmap] =
-    useState(0);
+  // Selected Domain Topics
+  const [topics, setTopics] = useState([]);
+  const [domainProject, setDomainProject] = useState(null);
+  const [loadingTopics, setLoadingTopics] = useState(false);
 
-  const [selectedTopic, setSelectedTopic] =
-    useState(null);
+  // Topic Modal State
+  const [selectedTopic, setSelectedTopic] = useState(null);
+  const [topicDetail, setTopicDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [activeTab, setActiveTab] = useState("learn"); // 'learn' | 'practice' | 'project'
 
-  const [activeTab, setActiveTab] =
-    useState("learn");
+  // Quiz & Practice interactive state
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [quizSubmitted, setQuizSubmitted] = useState(false);
+  const [expandedHints, setExpandedHints] = useState({});
+  const [completedTaskIds, setCompletedTaskIds] = useState({});
 
-  const [selectedAnswer, setSelectedAnswer] =
-    useState(null);
+  // Skill Gap Recommendations
+  const [recommendations, setRecommendations] = useState([]);
+  const [resumeScanMeta, setResumeScanMeta] = useState(null);
 
-  const [quizSubmitted, setQuizSubmitted] =
-    useState(false);
+  // Search & Filter
+  const [searchQuery, setSearchQuery] = useState("");
+  const [difficultyFilter, setDifficultyFilter] = useState("all");
 
-  /* =======================================================
-     SAVE PROGRESS
-  ======================================================= */
+  // Loading & Alert state
+  const [isUpdatingProgress, setIsUpdatingProgress] = useState(false);
 
-  useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(completedTopics)
-    );
-  }, [completedTopics]);
-
-  /* =======================================================
-     TOTAL TOPICS
-  ======================================================= */
-
-  const totalTopics = useMemo(() => {
-    return ROADMAP_DATA.reduce(
-      (total, roadmap) =>
-        total + roadmap.topics.length,
-      0
-    );
+  // Auth token helper
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem("prepnest_token");
+    const headers = { "Content-Type": "application/json" };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
   }, []);
 
-  const completedCount = useMemo(() => {
-    return Object.values(
-      completedTopics
-    ).filter(Boolean).length;
-  }, [completedTopics]);
-
-  const overallProgress =
-    totalTopics === 0
-      ? 0
-      : Math.round(
-          (completedCount / totalTopics) * 100
-        );
-
-  /* =======================================================
-     ROADMAP PROGRESS
-  ======================================================= */
-
-  const getRoadmapProgress = (roadmap) => {
-    const completed =
-      roadmap.topics.filter(
-        (_, index) =>
-          completedTopics[
-            `${roadmap.id}-${index}`
-          ]
-      ).length;
-
-    return Math.round(
-      (completed / roadmap.topics.length) *
-        100
-    );
-  };
-
-  /* =======================================================
-     TOPIC UNLOCK
-  ======================================================= */
-
-  const isTopicUnlocked = (
-    roadmap,
-    index
-  ) => {
-    if (index === 0) return true;
-
-    return Boolean(
-      completedTopics[
-        `${roadmap.id}-${index - 1}`
-      ]
-    );
-  };
-
-  /* =======================================================
-     OPEN TOPIC
-  ======================================================= */
-
-  const openTopic = (
-    roadmapId,
-    topicIndex
-  ) => {
-    const roadmap = ROADMAP_DATA.find(
-      (item) => item.id === roadmapId
-    );
-
-    if (!roadmap) return;
-
-    if (
-      !isTopicUnlocked(
-        roadmap,
-        topicIndex
-      )
-    ) {
-      return;
+  /* =========================================================
+     1. FETCH DOMAINS & PROGRESS
+  ========================================================= */
+  const fetchDomains = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/roadmap/domains`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to load roadmap domains");
+      const data = await res.json();
+      setDomains(data.domains || []);
+      setOverallStats(
+        data.overall || {
+          total_topics: 35,
+          completed_topics: 0,
+          progress_percentage: 0,
+        }
+      );
+    } catch (err) {
+      console.error("Error fetching roadmap domains:", err);
     }
+  }, [getAuthHeaders]);
 
-    const topic =
-      roadmap.topics[topicIndex];
+  /* =========================================================
+     2. FETCH RECOMMENDATIONS (From Resume Analyzer Gap)
+  ========================================================= */
+  const fetchRecommendations = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/roadmap/recommendations`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setRecommendations(data.recommendations || []);
+      setResumeScanMeta({
+        hasScan: data.has_resume_scan,
+        targetRole: data.target_role,
+        targetCompany: data.target_company,
+      });
+    } catch (err) {
+      console.warn("Could not load recommendations:", err);
+    }
+  }, [getAuthHeaders]);
 
-    setSelectedTopic({
-      roadmapId,
-      topicIndex,
-      topic,
-    });
+  useEffect(() => {
+    fetchDomains();
+    fetchRecommendations();
+  }, [fetchDomains, fetchRecommendations]);
 
-    setActiveTab("learn");
+  /* =========================================================
+     3. SYNC WITH URL QUERY (e.g. ?track=dsa)
+  ========================================================= */
+  useEffect(() => {
+    if (domains.length === 0) return;
+    const track = searchParams.get("track");
+    if (track) {
+      const idx = domains.findIndex(
+        (d) => d.id.toLowerCase() === track.toLowerCase()
+      );
+      if (idx !== -1) {
+        setSelectedDomainIndex(idx);
+      }
+    }
+  }, [searchParams, domains]);
+
+  /* =========================================================
+     4. FETCH TOPICS FOR CURRENT SELECTED DOMAIN
+  ========================================================= */
+  const currentDomain = domains[selectedDomainIndex] || null;
+
+  const fetchDomainTopics = useCallback(
+    async (domainId) => {
+      if (!domainId) return;
+      setLoadingTopics(true);
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/roadmap/domains/${domainId}/topics`,
+          {
+            headers: getAuthHeaders(),
+          }
+        );
+        if (!res.ok) throw new Error("Failed to load topics");
+        const data = await res.json();
+        setTopics(data.topics || []);
+        setDomainProject(data.project || null);
+      } catch (err) {
+        console.error("Error loading domain topics:", err);
+      } finally {
+        setLoadingTopics(false);
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  useEffect(() => {
+    if (currentDomain) {
+      fetchDomainTopics(currentDomain.id);
+    }
+  }, [currentDomain, fetchDomainTopics]);
+
+  /* =========================================================
+     5. FETCH FULL TOPIC DETAIL (MODAL)
+  ========================================================= */
+  const openTopicModal = async (topicId) => {
+    setLoadingDetail(true);
     setSelectedAnswer(null);
     setQuizSubmitted(false);
+    setActiveTab("learn");
+    try {
+      const res = await fetch(`${API_BASE}/api/roadmap/topics/${topicId}`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to load topic details");
+      const data = await res.json();
+      setSelectedTopic(data.topic);
+      setTopicDetail(data);
+    } catch (err) {
+      console.error("Error loading topic detail:", err);
+    } finally {
+      setLoadingDetail(false);
+    }
   };
 
-  /* =======================================================
-     TOGGLE COMPLETE
-  ======================================================= */
+  /* =========================================================
+     6. TOGGLE TOPIC COMPLETION
+  ========================================================= */
+  const handleToggleComplete = async (topicId, currentStatus) => {
+    if (!topicId || isUpdatingProgress) return;
+    setIsUpdatingProgress(true);
+    const newStatus = currentStatus ? "not_started" : "completed";
+    try {
+      const res = await fetch(`${API_BASE}/api/roadmap/progress`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          topic_id: topicId,
+          status: newStatus,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update progress");
+      const data = await res.json();
 
-  const markComplete = () => {
-    if (!selectedTopic) return;
+      // Update topics list state
+      setTopics((prev) => {
+        let prevComp = true;
+        return prev.map((t, idx) => {
+          if (t.id === topicId) {
+            const isComp = newStatus === "completed";
+            prevComp = isComp;
+            return { ...t, completed: isComp };
+          }
+          const isUnlocked = prevComp || idx === 0;
+          prevComp = t.completed;
+          return { ...t, unlocked: isUnlocked };
+        });
+      });
 
-    const key =
-      `${selectedTopic.roadmapId}-${selectedTopic.topicIndex}`;
+      // Update current open topic state if modal is open
+      if (selectedTopic && selectedTopic.id === topicId) {
+        setSelectedTopic((prev) => ({
+          ...prev,
+          is_completed: newStatus === "completed",
+        }));
+      }
 
-    setCompletedTopics((previous) => ({
-      ...previous,
-      [key]: true,
-    }));
-  };
-
-  /* =======================================================
-     RESET
-  ======================================================= */
-
-  const resetProgress = () => {
-    const confirmed =
-      window.confirm(
-        "Are you sure you want to reset all roadmap progress?"
+      // Update domain card progress
+      setDomains((prev) =>
+        prev.map((d) =>
+          d.id === data.domain_id
+            ? {
+                ...d,
+                completed_topics: data.domain_completed,
+                total_topics: data.domain_total,
+                progress_percentage: data.domain_progress_percentage,
+              }
+            : d
+        )
       );
 
+      // Update overall stats
+      setOverallStats((prev) => ({
+        ...prev,
+        completed_topics: data.overall_completed,
+        total_topics: data.overall_total,
+        progress_percentage: data.overall_progress_percentage,
+      }));
+    } catch (err) {
+      console.error("Error updating progress:", err);
+    } finally {
+      setIsUpdatingProgress(false);
+    }
+  };
+
+  /* =========================================================
+     7. GO TO NEXT TOPIC
+  ========================================================= */
+  const goToNextTopic = () => {
+    if (!selectedTopic || topics.length === 0) return;
+    const currentIndex = topics.findIndex((t) => t.id === selectedTopic.id);
+    if (currentIndex !== -1 && currentIndex + 1 < topics.length) {
+      const nextTopic = topics[currentIndex + 1];
+      openTopicModal(nextTopic.id);
+    } else {
+      setSelectedTopic(null);
+    }
+  };
+
+  /* =========================================================
+     8. RESET ALL PROGRESS
+  ========================================================= */
+  const handleResetProgress = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to reset your entire roadmap progress? This will reset all completed topics."
+    );
     if (!confirmed) return;
 
-    setCompletedTopics({});
-    setSelectedTopic(null);
-  };
-
-  /* =======================================================
-     NEXT TOPIC
-  ======================================================= */
-
-  const goToNextTopic = () => {
-    if (!selectedTopic) return;
-
-    const roadmap =
-      ROADMAP_DATA.find(
-        (item) =>
-          item.id ===
-          selectedTopic.roadmapId
-      );
-
-    if (!roadmap) return;
-
-    const nextIndex =
-      selectedTopic.topicIndex + 1;
-
-    if (
-      nextIndex <
-      roadmap.topics.length
-    ) {
-      openTopic(
-        roadmap.id,
-        nextIndex
-      );
-
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/api/roadmap/progress/reset`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Failed to reset progress");
+      setSelectedTopic(null);
+      await fetchDomains();
+      if (currentDomain) {
+        await fetchDomainTopics(currentDomain.id);
+      }
+    } catch (err) {
+      console.error("Error resetting progress:", err);
     }
-
-    setSelectedTopic(null);
   };
 
-  /* =======================================================
-     CURRENT ROADMAP
-  ======================================================= */
+  /* =========================================================
+     9. SEARCH & DIFFICULTY FILTERED TOPICS
+  ========================================================= */
+  const filteredTopics = useMemo(() => {
+    return topics.filter((t) => {
+      const matchesSearch =
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (t.description &&
+          t.description.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesDifficulty =
+        difficultyFilter === "all" ||
+        t.difficulty.toLowerCase() === difficultyFilter.toLowerCase();
+      return matchesSearch && matchesDifficulty;
+    });
+  }, [topics, searchQuery, difficultyFilter]);
 
-  const currentRoadmap =
-    ROADMAP_DATA[selectedRoadmap];
-
-  /* =======================================================
-     SELECTED TOPIC CONTENT
-  ======================================================= */
-
-  const selectedContent =
-    selectedTopic
-      ? TOPIC_CONTENT[
-          selectedTopic.topic
-        ]
-      : null;
-
-  /* =======================================================
+  /* =========================================================
      RENDER
-  ======================================================= */
-
+  ========================================================= */
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100 font-sans">
-
       <Sidebar activeRoute="roadmaps" />
 
       <div className="flex-1 flex flex-col min-w-0">
-
         <Header />
 
         <main className="p-8 space-y-8 overflow-y-auto">
-
           {/* =================================================
-              HEADER
+              TOP HEADER
           ================================================= */}
-
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-
             <div>
-
               <div className="flex items-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider">
-
                 <Map className="w-4 h-4" />
-
-                Career Roadmap
-
+                Career Roadmap & Learning Tracks
               </div>
-
               <h1 className="text-2xl font-extrabold text-white mt-2">
                 Your Developer Roadmap
               </h1>
-
               <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-                Learn step-by-step, practice each topic,
-                and track your preparation progress.
+                Master industry-aligned technical skills step-by-step, complete real practice tasks,
+                and track verified progress persisted to your profile.
               </p>
-
             </div>
 
             <button
-              onClick={resetProgress}
-              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-4 py-2.5 rounded-xl transition"
+              onClick={handleResetProgress}
+              className="flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold px-4 py-2.5 rounded-xl transition shadow-sm hover:text-white"
             >
               <RotateCcw className="w-4 h-4" />
-
               Reset Progress
-
             </button>
-
           </div>
 
           {/* =================================================
-              OVERALL PROGRESS
+              SKILL GAP RECOMMENDATION BANNER (If Resume Scanned)
           ================================================= */}
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-
-            <div className="md:col-span-2 p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
-              <div className="flex items-center justify-between">
-
-                <div className="flex items-center gap-3">
-
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-
-                    <Target className="w-5 h-5 text-indigo-400" />
-
+          {recommendations.length > 0 && (
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-950/60 via-purple-950/40 to-slate-900 border border-indigo-500/30 shadow-lg relative overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0 border border-indigo-500/30 mt-0.5">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
                   </div>
-
                   <div>
-
-                    <p className="text-xs text-slate-400">
-                      Overall Progress
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                        Personalized Recommendations
+                      </span>
+                      {resumeScanMeta?.targetRole && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-500/30">
+                          Target: {resumeScanMeta.targetRole}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1">
+                      {resumeScanMeta?.hasScan
+                        ? "Based on your latest Resume ATS analysis, we detected skill gaps. Master these topics first to boost your match score:"
+                        : "Recommended foundational topics to fast-track your technical interview preparation:"}
                     </p>
-
-                    <p className="text-lg font-bold text-white">
-                      {overallProgress}% Complete
-                    </p>
-
                   </div>
+                </div>
 
+                <Link
+                  to="/resume"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 shrink-0 self-start md:self-center transition"
+                >
+                  View Resume Analysis <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+
+              {/* Recommendation Chips */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                {recommendations.map((rec) => (
+                  <button
+                    key={rec.topic_id}
+                    onClick={() => {
+                      const dIdx = domains.findIndex(
+                        (d) => d.id === rec.domain_id
+                      );
+                      if (dIdx !== -1) setSelectedDomainIndex(dIdx);
+                      openTopicModal(rec.topic_id);
+                    }}
+                    className="flex flex-col text-left p-3 rounded-xl bg-slate-900/80 hover:bg-indigo-900/30 border border-slate-800 hover:border-indigo-500/40 transition group"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] uppercase font-bold text-indigo-400">
+                        {rec.domain_name}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">
+                        {rec.difficulty}
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold text-white mt-1 group-hover:text-indigo-300 transition line-clamp-1">
+                      {rec.title}
+                    </span>
+                    <span className="text-[11px] text-slate-400 mt-1 line-clamp-1">
+                      {rec.reason}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* =================================================
+              OVERALL PROGRESS & STATS
+          ================================================= */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="md:col-span-2 p-6 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                    <Target className="w-5 h-5 text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Overall Progress</p>
+                    <p className="text-lg font-bold text-white">
+                      {overallStats.progress_percentage}% Complete
+                    </p>
+                  </div>
                 </div>
 
                 <span className="text-sm font-bold text-indigo-400">
-                  {completedCount}/{totalTopics}
+                  {overallStats.completed_topics}/{overallStats.total_topics} Topics
                 </span>
-
               </div>
 
               <div className="mt-5 h-3 bg-slate-800 rounded-full overflow-hidden">
-
                 <div
                   className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
                   style={{
-                    width: `${overallProgress}%`,
+                    width: `${overallStats.progress_percentage}%`,
                   }}
                 />
-
               </div>
 
               <p className="text-xs text-slate-500 mt-3">
-                Complete topics to unlock the next step.
+                Complete topics and pass topic quizzes to unlock sequential stages.
               </p>
-
             </div>
 
-            {/* ACHIEVEMENT */}
-
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-600/20 to-purple-600/10 border border-indigo-500/20">
-
-              <Trophy className="w-6 h-6 text-indigo-400" />
-
-              <p className="text-xs text-slate-400 mt-4">
-                Current Achievement
+            {/* ACHIEVEMENT BADGE CARD */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-indigo-600/20 to-purple-600/10 border border-indigo-500/20 flex flex-col justify-between shadow-sm">
+              <div>
+                <div className="flex items-center justify-between">
+                  <Trophy className="w-6 h-6 text-indigo-400" />
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Tier Status
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-4">Current Achievement</p>
+                <p className="text-lg font-bold text-white mt-1">
+                  {overallStats.progress_percentage >= 80
+                    ? "Roadmap Master 🏆"
+                    : overallStats.progress_percentage >= 50
+                    ? "Halfway Hero ⚡"
+                    : overallStats.progress_percentage >= 25
+                    ? "Getting Started 🚀"
+                    : "Beginner Explorer 🧭"}
+                </p>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                {overallStats.progress_percentage >= 100
+                  ? "All modules verified and mastered!"
+                  : `${overallStats.total_topics - overallStats.completed_topics} more topics remaining to reach 100%.`}
               </p>
-
-              <p className="text-lg font-bold text-white mt-1">
-
-                {overallProgress >= 80
-                  ? "Roadmap Master"
-                  : overallProgress >= 50
-                  ? "Halfway Hero"
-                  : overallProgress >= 25
-                  ? "Getting Started"
-                  : "Beginner"}
-
-              </p>
-
-              <p className="text-xs text-slate-400 mt-1">
-                Keep learning and completing topics.
-              </p>
-
             </div>
-
           </div>
 
           {/* =================================================
-              ROADMAP STAGES
+              LEARNING PATH STAGES (DOMAINS)
           ================================================= */}
-
           <div>
-
-            <h2 className="text-lg font-bold text-white">
-              Learning Path
-            </h2>
-
+            <h2 className="text-lg font-bold text-white">Learning Tracks</h2>
             <p className="text-xs text-slate-500 mt-1 mb-5">
-              Select a stage to view its topics.
+              Select a track below to explore its structured topics, practice tasks, and domain project.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+              {domains.map((domain, index) => {
+                const Icon = ICON_MAP[domain.icon_name] || Code2;
+                const selected = selectedDomainIndex === index;
+                const progress = domain.progress_percentage || 0;
 
-              {ROADMAP_DATA.map(
-                (roadmap, index) => {
-
-                  const Icon =
-                    roadmap.icon;
-
-                  const progress =
-                    getRoadmapProgress(
-                      roadmap
-                    );
-
-                  const selected =
-                    selectedRoadmap ===
-                    index;
-
-                  return (
-                    <button
-                      key={roadmap.id}
-                      onClick={() =>
-                        setSelectedRoadmap(
-                          index
-                        )
-                      }
-                      className={`text-left p-5 rounded-2xl border transition-all ${
-                        selected
-                          ? "bg-indigo-500/10 border-indigo-500/60 shadow-lg shadow-indigo-500/10"
-                          : "bg-slate-900/60 border-slate-800 hover:border-slate-700"
-                      }`}
-                    >
-
-                      <div className="flex items-start justify-between">
-
-                        <div className="w-11 h-11 rounded-xl bg-slate-800 flex items-center justify-center">
-
-                          <Icon className="w-5 h-5 text-indigo-400" />
-
-                        </div>
-
-                        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-800 text-slate-400">
-                          {roadmap.level}
-                        </span>
-
+                return (
+                  <button
+                    key={domain.id}
+                    onClick={() => {
+                      setSelectedDomainIndex(index);
+                      setSearchParams({ track: domain.id });
+                    }}
+                    className={`text-left p-5 rounded-2xl border transition-all ${
+                      selected
+                        ? "bg-indigo-500/10 border-indigo-500/60 shadow-lg shadow-indigo-500/10"
+                        : "bg-slate-900/60 border-slate-800 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="w-11 h-11 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700/50">
+                        <Icon className="w-5 h-5 text-indigo-400" />
                       </div>
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-800 text-slate-400">
+                        {domain.difficulty}
+                      </span>
+                    </div>
 
-                      <h3 className="text-sm font-bold text-white mt-4">
-                        {roadmap.title}
-                      </h3>
+                    <h3 className="text-sm font-bold text-white mt-4">
+                      {domain.name}
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-2 min-h-[36px] line-clamp-2">
+                      {domain.description}
+                    </p>
 
-                      <p className="text-xs text-slate-400 mt-2 min-h-[36px]">
-                        {roadmap.description}
-                      </p>
+                    <div className="flex items-center gap-4 mt-4 text-[11px] text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {domain.estimated_weeks}
+                      </span>
+                      <span>{domain.total_topics} topics</span>
+                    </div>
 
-                      <div className="flex items-center gap-4 mt-4 text-[11px] text-slate-500">
-
-                        <span className="flex items-center gap-1">
-
-                          <Clock className="w-3.5 h-3.5" />
-
-                          {roadmap.duration}
-
+                    <div className="mt-4">
+                      <div className="flex justify-between text-[11px] mb-2">
+                        <span className="text-slate-500">Progress</span>
+                        <span className="text-indigo-400 font-bold">
+                          {progress}%
                         </span>
-
-                        <span>
-                          {roadmap.topics.length} topics
-                        </span>
-
                       </div>
-
-                      <div className="mt-4">
-
-                        <div className="flex justify-between text-[11px] mb-2">
-
-                          <span className="text-slate-500">
-                            Progress
-                          </span>
-
-                          <span className="text-indigo-400 font-bold">
-                            {progress}%
-                          </span>
-
-                        </div>
-
-                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-
-                          <div
-                            className="h-full bg-indigo-500 rounded-full transition-all"
-                            style={{
-                              width: `${progress}%`,
-                            }}
-                          />
-
-                        </div>
-
+                      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full transition-all"
+                          style={{ width: `${progress}%` }}
+                        />
                       </div>
-
-                    </button>
-                  );
-                }
-              )}
-
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-
           </div>
 
           {/* =================================================
-              SELECTED ROADMAP TOPICS
+              SELECTED TRACK TOPICS SECTION
           ================================================= */}
+          {currentDomain && (
+            <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs uppercase font-bold text-indigo-400">
+                      Track {selectedDomainIndex + 1} of {domains.length}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">
+                      {currentDomain.difficulty}
+                    </span>
+                  </div>
+                  <h2 className="text-lg font-bold text-white mt-1">
+                    {currentDomain.name}
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {currentDomain.description}
+                  </p>
+                </div>
 
-          <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-
-              <div>
-
-                <h2 className="text-lg font-bold text-white">
-                  {currentRoadmap.title}
-                </h2>
-
-                <p className="text-xs text-slate-400 mt-1">
-                  {currentRoadmap.description}
-                </p>
-
+                {domainProject && (
+                  <button
+                    onClick={() => {
+                      if (topics.length > 0) openTopicModal(topics[0].id);
+                      setActiveTab("project");
+                    }}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-semibold self-start md:self-center transition"
+                  >
+                    <FolderGit2 className="w-4 h-4 text-indigo-400" />
+                    <span>Domain Mini-Project</span>
+                  </button>
+                )}
               </div>
 
-              <div className="text-right">
+              {/* SEARCH & FILTERS */}
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search topics in this track..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                  />
+                </div>
 
-                <p className="text-2xl font-extrabold text-indigo-400">
-                  {getRoadmapProgress(
-                    currentRoadmap
-                  )}
-                  %
-                </p>
-
-                <p className="text-[10px] text-slate-500">
-                  Completed
-                </p>
-
+                <div className="flex items-center gap-2">
+                  <select
+                    value={difficultyFilter}
+                    onChange={(e) => setDifficultyFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="all">All Difficulties</option>
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                  </select>
+                </div>
               </div>
 
-            </div>
+              {/* TOPIC LIST */}
+              {loadingTopics ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-400 mb-2" />
+                  <span className="text-xs">Loading roadmap topics from Neon DB...</span>
+                </div>
+              ) : filteredTopics.length === 0 ? (
+                <div className="text-center py-10 text-slate-500 text-xs">
+                  No topics match your current search or filter criteria.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredTopics.map((topic, index) => {
+                    const completed = topic.completed;
+                    const unlocked = topic.unlocked;
 
-            <div className="mt-6 space-y-3">
-
-              {currentRoadmap.topics.map(
-                (topic, index) => {
-
-                  const key =
-                    `${currentRoadmap.id}-${index}`;
-
-                  const completed =
-                    Boolean(
-                      completedTopics[key]
-                    );
-
-                  const unlocked =
-                    isTopicUnlocked(
-                      currentRoadmap,
-                      index
-                    );
-
-                  return (
-                    <button
-                      key={key}
-                      onClick={() =>
-                        openTopic(
-                          currentRoadmap.id,
-                          index
-                        )
-                      }
-                      disabled={!unlocked}
-                      className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition ${
-                        completed
-                          ? "bg-emerald-500/5 border-emerald-500/20"
-                          : unlocked
-                          ? "bg-slate-800/30 border-slate-700/50 hover:border-indigo-500/50 hover:bg-indigo-500/5"
-                          : "bg-slate-900 border-slate-800 opacity-60 cursor-not-allowed"
-                      }`}
-                    >
-
-                      {/* NUMBER / STATUS */}
-
+                    return (
                       <div
-                        className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center border ${
+                        key={topic.id}
+                        className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${
                           completed
-                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                            ? "bg-emerald-500/5 border-emerald-500/20"
                             : unlocked
-                            ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
-                            : "bg-slate-900 border-slate-800 text-slate-700"
+                            ? "bg-slate-950/70 border-slate-800 hover:border-slate-700"
+                            : "bg-slate-950/30 border-slate-900 opacity-60"
                         }`}
                       >
-
-                        {completed ? (
-                          <CheckCircle2 className="w-5 h-5" />
-                        ) : unlocked ? (
-                          <span className="font-bold text-sm">
-                            {index + 1}
-                          </span>
-                        ) : (
-                          <Lock className="w-4 h-4" />
-                        )}
-
-                      </div>
-
-                      {/* TOPIC */}
-
-                      <div className="flex-1">
-
-                        <p
-                          className={`text-sm font-semibold ${
+                        {/* STATUS ICON / NUMBER */}
+                        <div
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                             completed
-                              ? "text-emerald-400"
-                              : "text-white"
+                              ? "bg-emerald-500/20 text-emerald-400"
+                              : unlocked
+                              ? "bg-indigo-500/10 text-indigo-400"
+                              : "bg-slate-800 text-slate-600"
                           }`}
                         >
-                          {topic}
-                        </p>
-
-                        <p className="text-[11px] text-slate-500 mt-1">
-
-                          {completed
-                            ? "Completed — click to review"
-                            : unlocked
-                            ? "Click to learn and practice"
-                            : "Complete the previous topic first"}
-
-                        </p>
-
-                      </div>
-
-                      {/* ACTION */}
-
-                      {unlocked && (
-                        <div className="flex items-center gap-2 text-indigo-400">
-
-                          <BookOpen className="w-4 h-4" />
-
-                          <ChevronRight className="w-4 h-4" />
-
+                          {completed ? (
+                            <CheckCircle2 className="w-5 h-5" />
+                          ) : unlocked ? (
+                            <span className="font-bold text-sm">
+                              {topic.display_order || index + 1}
+                            </span>
+                          ) : (
+                            <Lock className="w-4 h-4" />
+                          )}
                         </div>
-                      )}
 
-                    </button>
-                  );
-                }
+                        {/* TOPIC INFO */}
+                        <div
+                          onClick={() => unlocked && openTopicModal(topic.id)}
+                          className={`flex-1 cursor-pointer ${
+                            !unlocked ? "pointer-events-none" : ""
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <p
+                              className={`text-sm font-semibold ${
+                                completed ? "text-emerald-400" : "text-white"
+                              }`}
+                            >
+                              {topic.title}
+                            </p>
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                              {topic.difficulty}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              ~{topic.estimated_hours}h
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
+                            {topic.description ||
+                              (completed
+                                ? "Completed — click to review content and practice tasks"
+                                : unlocked
+                                ? "Click to learn concepts, practice tasks, and quiz"
+                                : "Complete the previous topic to unlock")}
+                          </p>
+                        </div>
+
+                        {/* ACTION BUTTONS */}
+                        {unlocked && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() =>
+                                handleToggleComplete(topic.id, completed)
+                              }
+                              title={
+                                completed
+                                  ? "Mark as uncompleted"
+                                  : "Mark as completed"
+                              }
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+                                completed
+                                  ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                                  : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                              }`}
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">
+                                {completed ? "Completed" : "Mark Done"}
+                              </span>
+                            </button>
+
+                            <button
+                              onClick={() => openTopicModal(topic.id)}
+                              className="w-8 h-8 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 flex items-center justify-center transition"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-
             </div>
-
-          </div>
-
+          )}
         </main>
-
       </div>
 
       {/* =====================================================
-          TOPIC MODAL
+          DETAILED TOPIC MODAL
       ===================================================== */}
-
-      {selectedTopic && selectedContent && (
-
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-5">
-
-          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl">
-
-            {/* MODAL HEADER */}
-
-            <div className="sticky top-0 z-10 bg-slate-900 border-b border-slate-800 p-6">
-
+      {selectedTopic && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
+            {/* STICKY MODAL HEADER */}
+            <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 p-6 pb-4">
               <div className="flex items-start justify-between gap-5">
-
                 <div>
-
-                  <p className="text-xs uppercase tracking-wider font-bold text-indigo-400">
-                    {currentRoadmap.title}
-                  </p>
-
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs uppercase tracking-wider font-bold text-indigo-400">
+                      {currentDomain?.name || "Topic Detail"}
+                    </p>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                      {selectedTopic.difficulty}
+                    </span>
+                    {selectedTopic.is_completed && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Done
+                      </span>
+                    )}
+                  </div>
                   <h2 className="text-xl font-extrabold text-white mt-1">
-                    {selectedTopic.topic}
+                    {selectedTopic.title}
                   </h2>
-
                 </div>
 
                 <button
-                  onClick={() =>
-                    setSelectedTopic(null)
-                  }
-                  className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400"
+                  onClick={() => setSelectedTopic(null)}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition"
                 >
                   <X className="w-5 h-5" />
                 </button>
-
               </div>
 
               {/* TABS */}
-
               <div className="flex gap-2 mt-5">
-
                 <button
-                  onClick={() =>
-                    setActiveTab("learn")
-                  }
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold ${
+                  onClick={() => setActiveTab("learn")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition ${
                     activeTab === "learn"
-                      ? "bg-indigo-600 text-white"
+                      ? "bg-indigo-600 text-white shadow"
                       : "bg-slate-800 text-slate-400 hover:text-white"
                   }`}
                 >
-
                   <BookOpen className="w-4 h-4" />
-
-                  Learn
-
+                  Learn & Docs
                 </button>
-
-                <button
-                  onClick={() =>
-                    setActiveTab("practice")
-                  }
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold ${
-                    activeTab === "practice"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-800 text-slate-400 hover:text-white"
-                  }`}
-                >
-
-                  <PlayCircle className="w-4 h-4" />
-
-                  Practice
-
-                </button>
-
-              </div>
-
-            </div>
-
-            {/* =================================================
-                LEARN TAB
-            ================================================= */}
-
-            {activeTab === "learn" && (
-
-              <div className="p-6 space-y-6">
-
-                {/* EXPLANATION */}
-
-                <div>
-
-                  <div className="flex items-center gap-2 mb-3">
-
-                    <Lightbulb className="w-5 h-5 text-amber-400" />
-
-                    <h3 className="text-sm font-bold text-white">
-                      What is this?
-                    </h3>
-
-                  </div>
-
-                  <p className="text-sm text-slate-300 leading-relaxed">
-                    {selectedContent.explanation}
-                  </p>
-
-                </div>
-
-                {/* KEY POINTS */}
-
-                <div>
-
-                  <h3 className="text-sm font-bold text-white mb-3">
-                    Key Points
-                  </h3>
-
-                  <div className="space-y-2">
-
-                    {selectedContent.points.map(
-                      (point, index) => (
-                        <div
-                          key={index}
-                          className="flex gap-3 p-3 rounded-lg bg-slate-800/50"
-                        >
-
-                          <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-
-                          <p className="text-xs text-slate-300">
-                            {point}
-                          </p>
-
-                        </div>
-                      )
-                    )}
-
-                  </div>
-
-                </div>
-
-                {/* EXAMPLE */}
-
-                <div>
-
-                  <h3 className="text-sm font-bold text-white mb-3">
-                    Example
-                  </h3>
-
-                  <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs text-indigo-300 overflow-x-auto whitespace-pre-wrap">
-                    {selectedContent.example}
-                  </pre>
-
-                </div>
-
-                {/* PRACTICE BUTTON */}
 
                 <button
                   onClick={() => {
@@ -1726,250 +838,506 @@ export default function RoadmapsPage() {
                     setSelectedAnswer(null);
                     setQuizSubmitted(false);
                   }}
-                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm px-5 py-3 rounded-xl transition"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition ${
+                    activeTab === "practice"
+                      ? "bg-indigo-600 text-white shadow"
+                      : "bg-slate-800 text-slate-400 hover:text-white"
+                  }`}
                 >
-
-                  Practice This Topic
-
-                  <ArrowRight className="w-4 h-4" />
-
+                  <PlayCircle className="w-4 h-4" />
+                  Practice Tasks & Quiz
                 </button>
 
-              </div>
-
-            )}
-
-            {/* =================================================
-                PRACTICE TAB
-            ================================================= */}
-
-            {activeTab === "practice" && (
-
-              <div className="p-6 space-y-6">
-
-                <div className="p-5 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
-
-                  <div className="flex items-center gap-2">
-
-                    <PlayCircle className="w-5 h-5 text-indigo-400" />
-
-                    <p className="text-xs font-bold uppercase tracking-wider text-indigo-400">
-                      Quick Practice
-                    </p>
-
-                  </div>
-
-                  <h3 className="text-base font-bold text-white mt-4 leading-relaxed">
-                    {selectedContent.question}
-                  </h3>
-
-                </div>
-
-                {/* OPTIONS */}
-
-                <div className="space-y-3">
-
-                  {selectedContent.options.map(
-                    (option, index) => {
-
-                      const selected =
-                        selectedAnswer ===
-                        index;
-
-                      const correct =
-                        selectedContent.answer ===
-                        index;
-
-                      let className =
-                        "border-slate-700 bg-slate-800/40 hover:border-indigo-500";
-
-                      if (
-                        quizSubmitted &&
-                        correct
-                      ) {
-                        className =
-                          "border-emerald-500/50 bg-emerald-500/10";
-                      }
-
-                      if (
-                        quizSubmitted &&
-                        selected &&
-                        !correct
-                      ) {
-                        className =
-                          "border-rose-500/50 bg-rose-500/10";
-                      }
-
-                      if (
-                        !quizSubmitted &&
-                        selected
-                      ) {
-                        className =
-                          "border-indigo-500 bg-indigo-500/10";
-                      }
-
-                      return (
-                        <button
-                          key={index}
-                          disabled={
-                            quizSubmitted
-                          }
-                          onClick={() =>
-                            setSelectedAnswer(
-                              index
-                            )
-                          }
-                          className={`w-full p-4 rounded-xl border text-left flex items-center gap-3 transition ${className}`}
-                        >
-
-                          <span className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
-
-                            {String.fromCharCode(
-                              65 + index
-                            )}
-
-                          </span>
-
-                          <span className="text-sm text-slate-200 flex-1">
-                            {option}
-                          </span>
-
-                          {quizSubmitted &&
-                            correct && (
-                              <Check className="w-5 h-5 text-emerald-400" />
-                            )}
-
-                          {quizSubmitted &&
-                            selected &&
-                            !correct && (
-                              <X className="w-5 h-5 text-rose-400" />
-                            )}
-
-                        </button>
-                      );
-                    }
-                  )}
-
-                </div>
-
-                {/* SUBMIT */}
-
-                {!quizSubmitted ? (
-
+                {topicDetail?.mini_project && (
                   <button
-                    disabled={
-                      selectedAnswer === null
-                    }
-                    onClick={() =>
-                      setQuizSubmitted(
-                        true
-                      )
-                    }
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-semibold text-sm py-3 rounded-xl transition"
-                  >
-                    Check Answer
-                  </button>
-
-                ) : (
-
-                  <div
-                    className={`p-5 rounded-xl border ${
-                      selectedAnswer ===
-                      selectedContent.answer
-                        ? "bg-emerald-500/10 border-emerald-500/30"
-                        : "bg-rose-500/10 border-rose-500/30"
+                    onClick={() => setActiveTab("project")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition ${
+                      activeTab === "project"
+                        ? "bg-indigo-600 text-white shadow"
+                        : "bg-slate-800 text-slate-400 hover:text-white"
                     }`}
                   >
+                    <FolderGit2 className="w-4 h-4" />
+                    Mini-Project
+                  </button>
+                )}
+              </div>
+            </div>
 
-                    <div className="flex items-center gap-3">
-
-                      {selectedAnswer ===
-                      selectedContent.answer ? (
-                        <CheckCircle2 className="w-6 h-6 text-emerald-400" />
-                      ) : (
-                        <X className="w-6 h-6 text-rose-400" />
-                      )}
-
-                      <div>
-
-                        <p className="text-sm font-bold text-white">
-
-                          {selectedAnswer ===
-                          selectedContent.answer
-                            ? "Correct!"
-                            : "Not quite right"}
-
-                        </p>
-
-                        <p className="text-xs text-slate-400 mt-1">
-
-                          {selectedAnswer ===
-                          selectedContent.answer
-                            ? "Great job. You can now complete this topic."
-                            : `The correct answer is: ${selectedContent.options[selectedContent.answer]}`}
-
-                        </p>
-
+            {/* MODAL BODY */}
+            {loadingDetail ? (
+              <div className="flex flex-col items-center justify-center p-12 text-slate-400">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-400 mb-2" />
+                <p className="text-xs">Fetching comprehensive topic material...</p>
+              </div>
+            ) : (
+              <div className="p-6 space-y-6 flex-1">
+                {/* =================================================
+                    TAB 1: LEARN
+                ================================================= */}
+                {activeTab === "learn" && (
+                  <div className="space-y-6">
+                    {/* EXPLANATION */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Lightbulb className="w-5 h-5 text-amber-400" />
+                        <h3 className="text-sm font-bold text-white">
+                          What is this?
+                        </h3>
                       </div>
-
+                      <p className="text-sm text-slate-300 leading-relaxed bg-slate-800/40 p-4 rounded-xl border border-slate-800/60">
+                        {selectedTopic.explanation}
+                      </p>
                     </div>
 
-                  </div>
+                    {/* KEY POINTS */}
+                    {selectedTopic.key_points &&
+                      selectedTopic.key_points.length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-bold text-white mb-3">
+                            Key Concepts & Takeaways
+                          </h3>
+                          <div className="space-y-2">
+                            {selectedTopic.key_points.map((point, index) => (
+                              <div
+                                key={index}
+                                className="flex gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-800/60"
+                              >
+                                <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                                <p className="text-xs text-slate-300">{point}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
-                )}
+                    {/* CODE EXAMPLE */}
+                    {selectedTopic.code_example && (
+                      <div>
+                        <h3 className="text-sm font-bold text-white mb-3">
+                          Code / Syntax Example
+                        </h3>
+                        <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs text-indigo-300 overflow-x-auto whitespace-pre-wrap font-mono">
+                          {selectedTopic.code_example}
+                        </pre>
+                      </div>
+                    )}
 
-                {/* COMPLETE */}
+                    {/* VERIFIED LEARNING RESOURCES */}
+                    {topicDetail?.resources &&
+                      topicDetail.resources.length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                            <span>Curated Verified Resources</span>
+                            <span className="text-[10px] font-normal text-slate-400">
+                              (Docs, Free Courses & Videos)
+                            </span>
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {topicDetail.resources.map((res) => (
+                              <a
+                                key={res.id}
+                                href={res.url}
+                                target={res.url.startsWith("http") ? "_blank" : "_self"}
+                                rel="noreferrer"
+                                className="flex items-start gap-3 p-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-indigo-500/50 transition group"
+                              >
+                                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20 group-hover:bg-indigo-500/20">
+                                  {res.resource_type === "video" ? (
+                                    <PlayCircle className="w-4 h-4 text-rose-400" />
+                                  ) : (
+                                    <BookOpen className="w-4 h-4 text-indigo-400" />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-semibold text-white group-hover:text-indigo-300 transition line-clamp-1">
+                                    {res.title}
+                                  </p>
+                                  <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
+                                    <span>{res.provider}</span>
+                                    <span>•</span>
+                                    <span className="uppercase text-[9px] px-1.5 py-0.2 rounded bg-slate-900 text-slate-400">
+                                      {res.resource_type}
+                                    </span>
+                                  </div>
+                                </div>
+                                <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 shrink-0 mt-1" />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
-                {quizSubmitted &&
-                  selectedAnswer ===
-                    selectedContent.answer && (
-
+                    {/* GO TO PRACTICE CTA */}
                     <button
                       onClick={() => {
-                        markComplete();
+                        setActiveTab("practice");
+                        setSelectedAnswer(null);
+                        setQuizSubmitted(false);
                       }}
-                      className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm py-3 rounded-xl transition"
+                      className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm px-5 py-3 rounded-xl transition shadow"
                     >
-
-                      <CheckCircle2 className="w-5 h-5" />
-
-                      Mark Topic Complete
-
+                      <span>Practice This Topic</span>
+                      <ArrowRight className="w-4 h-4" />
                     </button>
-
-                  )}
-
-                {/* NEXT */}
-
-                {completedTopics[
-                  `${selectedTopic.roadmapId}-${selectedTopic.topicIndex}`
-                ] && (
-
-                  <button
-                    onClick={
-                      goToNextTopic
-                    }
-                    className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-sm py-3 rounded-xl transition"
-                  >
-
-                    Next Topic
-
-                    <ChevronRight className="w-4 h-4" />
-
-                  </button>
-
+                  </div>
                 )}
 
-              </div>
+                {/* =================================================
+                    TAB 2: PRACTICE TASKS & QUIZ
+                ================================================= */}
+                {activeTab === "practice" && (
+                  <div className="space-y-6">
+                    {/* SECTION A: REAL PRACTICE TASKS (>=3) */}
+                    {topicDetail?.practice_tasks &&
+                      topicDetail.practice_tasks.length > 0 && (
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                              <CheckSquare className="w-4 h-4 text-indigo-400" />
+                              <span>Hands-on Practice Tasks</span>
+                            </h3>
+                            <span className="text-[11px] text-slate-400">
+                              {
+                                Object.keys(completedTaskIds).filter(
+                                  (id) => completedTaskIds[id]
+                                ).length
+                              }
+                              /{topicDetail.practice_tasks.length} solved
+                            </span>
+                          </div>
 
+                          <div className="space-y-3">
+                            {topicDetail.practice_tasks.map((task, idx) => {
+                              const isTaskDone = completedTaskIds[task.id];
+                              const isHintOpen = expandedHints[task.id];
+
+                              return (
+                                <div
+                                  key={task.id}
+                                  className={`p-4 rounded-xl border transition ${
+                                    isTaskDone
+                                      ? "bg-emerald-500/5 border-emerald-500/20"
+                                      : "bg-slate-800/40 border-slate-800"
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-start gap-3">
+                                      <button
+                                        onClick={() =>
+                                          setCompletedTaskIds((prev) => ({
+                                            ...prev,
+                                            [task.id]: !prev[task.id],
+                                          }))
+                                        }
+                                        className="mt-0.5 text-slate-400 hover:text-emerald-400 transition"
+                                      >
+                                        {isTaskDone ? (
+                                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                        ) : (
+                                          <Square className="w-4 h-4" />
+                                        )}
+                                      </button>
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs font-bold text-white">
+                                            Task {idx + 1}: {task.title}
+                                          </span>
+                                          <span
+                                            className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
+                                              task.difficulty === "Easy"
+                                                ? "bg-emerald-500/20 text-emerald-300"
+                                                : task.difficulty === "Medium"
+                                                ? "bg-amber-500/20 text-amber-300"
+                                                : "bg-rose-500/20 text-rose-300"
+                                            }`}
+                                          >
+                                            {task.difficulty}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                                          {task.description}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {task.hint && (
+                                      <button
+                                        onClick={() =>
+                                          setExpandedHints((prev) => ({
+                                            ...prev,
+                                            [task.id]: !prev[task.id],
+                                          }))
+                                        }
+                                        className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0 flex items-center gap-1 font-medium transition"
+                                      >
+                                        {isHintOpen ? "Hide Hint" : "Hint"}
+                                        {isHintOpen ? (
+                                          <ChevronUp className="w-3.5 h-3.5" />
+                                        ) : (
+                                          <ChevronDown className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* HINT ACCORDION */}
+                                  {isHintOpen && task.hint && (
+                                    <div className="mt-3 p-3 rounded-lg bg-indigo-950/40 border border-indigo-500/20 text-xs text-indigo-200">
+                                      <strong className="text-indigo-300 font-semibold">
+                                        💡 Hint:
+                                      </strong>{" "}
+                                      {task.hint}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* SECTION B: RELEVANT DSA PROBLEMS (If Available) */}
+                    {topicDetail?.dsa_problems &&
+                      topicDetail.dsa_problems.length > 0 && (
+                        <div className="p-4 rounded-xl bg-slate-800/30 border border-slate-800">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-2 flex items-center gap-2">
+                            <BrainCircuit className="w-4 h-4" />
+                            <span>Linked DSA Problems on PrepNest</span>
+                          </h4>
+                          <p className="text-xs text-slate-400 mb-3">
+                            Strengthen this data structure with curated practice problems in our DSA module:
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {topicDetail.dsa_problems.map((prob) => (
+                              <Link
+                                key={prob.id}
+                                to={`/dsa?search=${encodeURIComponent(prob.title)}`}
+                                className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-indigo-500/40 text-xs text-white hover:text-indigo-300 transition group"
+                              >
+                                <span className="font-medium line-clamp-1">
+                                  {prob.title}
+                                </span>
+                                <span
+                                  className={`text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0 ml-2 ${
+                                    prob.difficulty === "Easy"
+                                      ? "text-emerald-400 bg-emerald-500/10"
+                                      : prob.difficulty === "Medium"
+                                      ? "text-amber-400 bg-amber-500/10"
+                                      : "text-rose-400 bg-rose-500/10"
+                                  }`}
+                                >
+                                  {prob.difficulty}
+                                </span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* SECTION C: TOPIC QUIZ */}
+                    {selectedTopic.quiz && selectedTopic.quiz.question && (
+                      <div className="p-5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <HelpCircle className="w-4 h-4 text-indigo-400" />
+                            <h3 className="text-sm font-bold text-white">
+                              Topic Knowledge Check
+                            </h3>
+                          </div>
+                          <span className="text-[10px] text-slate-500">
+                            Single Choice
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-200 font-medium">
+                          {selectedTopic.quiz.question}
+                        </p>
+
+                        <div className="space-y-2">
+                          {selectedTopic.quiz.options?.map((option, index) => {
+                            const isSelected = selectedAnswer === index;
+                            const isCorrect =
+                              quizSubmitted &&
+                              index === selectedTopic.quiz.answer;
+                            const isWrong =
+                              quizSubmitted &&
+                              isSelected &&
+                              index !== selectedTopic.quiz.answer;
+
+                            return (
+                              <button
+                                key={index}
+                                onClick={() => {
+                                  if (!quizSubmitted) setSelectedAnswer(index);
+                                }}
+                                disabled={quizSubmitted}
+                                className={`w-full text-left p-3 rounded-lg border text-xs font-medium transition ${
+                                  isCorrect
+                                    ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 font-semibold"
+                                    : isWrong
+                                    ? "bg-rose-500/20 border-rose-500 text-rose-300 font-semibold"
+                                    : isSelected
+                                    ? "bg-indigo-500/20 border-indigo-500 text-white"
+                                    : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                                }`}
+                              >
+                                <span className="font-mono text-slate-500 mr-2">
+                                  {String.fromCharCode(65 + index)}.
+                                </span>
+                                {option}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* SUBMIT BUTTON */}
+                        {!quizSubmitted ? (
+                          <button
+                            onClick={() => {
+                              if (selectedAnswer !== null) {
+                                setQuizSubmitted(true);
+                              }
+                            }}
+                            disabled={selectedAnswer === null}
+                            className={`w-full py-2.5 rounded-xl text-xs font-semibold transition ${
+                              selectedAnswer !== null
+                                ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow"
+                                : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                            }`}
+                          >
+                            Submit Answer
+                          </button>
+                        ) : (
+                          <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
+                            <div className="flex items-center gap-2">
+                              {selectedAnswer === selectedTopic.quiz.answer ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <X className="w-4 h-4 text-rose-400" />
+                              )}
+                              <span className="text-xs font-bold text-white">
+                                {selectedAnswer === selectedTopic.quiz.answer
+                                  ? "Correct! Excellent grasp of this concept."
+                                  : "Incorrect answer."}
+                              </span>
+                            </div>
+                            {selectedTopic.quiz.explanation && (
+                              <p className="text-[11px] text-slate-400 mt-1 pl-6">
+                                {selectedTopic.quiz.explanation}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* =================================================
+                    TAB 3: DOMAIN MINI-PROJECT
+                ================================================= */}
+                {activeTab === "project" && topicDetail?.mini_project && (
+                  <div className="space-y-6">
+                    <div className="p-5 rounded-xl bg-gradient-to-br from-indigo-950/40 to-slate-900 border border-indigo-500/30">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">
+                          Domain Capstone Project
+                        </span>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200">
+                          ~{topicDetail.mini_project.estimated_hours} Hours
+                        </span>
+                      </div>
+                      <h3 className="text-base font-extrabold text-white mt-1">
+                        {topicDetail.mini_project.title}
+                      </h3>
+                      <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                        {topicDetail.mini_project.description}
+                      </p>
+
+                      {/* TECH STACK */}
+                      {topicDetail.mini_project.tech_stack && (
+                        <div className="flex flex-wrap gap-1.5 mt-4">
+                          {topicDetail.mini_project.tech_stack.map((tech, i) => (
+                            <span
+                              key={i}
+                              className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-indigo-300 font-medium border border-slate-700"
+                            >
+                              {tech}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* REQUIREMENTS */}
+                    {topicDetail.mini_project.requirements && (
+                      <div>
+                        <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                          <CheckSquare className="w-4 h-4 text-indigo-400" />
+                          <span>Implementation Requirements</span>
+                        </h4>
+                        <div className="space-y-2">
+                          {topicDetail.mini_project.requirements.map(
+                            (req, idx) => (
+                              <div
+                                key={idx}
+                                className="flex gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-800"
+                              >
+                                <span className="text-indigo-400 font-bold text-xs shrink-0">
+                                  {idx + 1}.
+                                </span>
+                                <p className="text-xs text-slate-300">{req}</p>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
+            {/* STICKY MODAL FOOTER */}
+            <div className="sticky bottom-0 z-10 bg-slate-900 border-t border-slate-800 p-5 flex flex-col sm:flex-row items-center gap-3">
+              <button
+                onClick={() =>
+                  handleToggleComplete(
+                    selectedTopic.id,
+                    selectedTopic.is_completed
+                  )
+                }
+                disabled={isUpdatingProgress}
+                className={`w-full sm:flex-1 flex items-center justify-center gap-2 font-semibold text-xs py-3 rounded-xl transition shadow ${
+                  selectedTopic.is_completed
+                    ? "bg-slate-800 hover:bg-slate-700 text-emerald-400"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                }`}
+              >
+                {isUpdatingProgress ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                <span>
+                  {selectedTopic.is_completed
+                    ? "Completed (Click to Re-open)"
+                    : "Mark Topic Complete"}
+                </span>
+              </button>
+
+              <button
+                onClick={goToNextTopic}
+                className="w-full sm:w-auto px-5 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs py-3 rounded-xl transition"
+              >
+                <span>Next Topic</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-
         </div>
-
       )}
-
     </div>
   );
 }
