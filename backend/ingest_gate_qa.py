@@ -52,6 +52,9 @@ def ingest_dataset(gate_qa_dir, questions_per_topic=30):
     cursor.execute("ALTER TABLE aptitude_questions ADD COLUMN IF NOT EXISTS company_tag TEXT;")
     conn.commit()
 
+    cursor.execute("SELECT question_text FROM aptitude_questions;")
+    existing_texts = set(r["question_text"] for r in cursor.fetchall())
+
     total_inserted = 0
     total_skipped = 0
 
@@ -69,6 +72,7 @@ def ingest_dataset(gate_qa_dir, questions_per_topic=30):
         topic_files = [f for f in os.listdir(sub_folder) if f.endswith(".json")]
         print(f"\n📂 Processing {folder_name.upper()} ({len(topic_files)} topics)...")
 
+        batch = []
         for f in topic_files:
             file_path = os.path.join(sub_folder, f)
             with open(file_path, "r", encoding="utf-8", errors="ignore") as fl:
@@ -96,9 +100,8 @@ def ingest_dataset(gate_qa_dir, questions_per_topic=30):
 
             topic_inserted = 0
             for raw_item, q_text, cleaned_opts, ans in selected:
-                # Check for duplicate
-                cursor.execute("SELECT id FROM aptitude_questions WHERE question_text = %s", (q_text,))
-                if cursor.fetchone():
+                # Check for duplicate in set
+                if q_text in existing_texts:
                     total_skipped += 1
                     continue
 
@@ -106,7 +109,7 @@ def ingest_dataset(gate_qa_dir, questions_per_topic=30):
                 company = random.choice(COMPANIES)
                 difficulty = random.choice(["Easy", "Medium", "Medium", "Hard"])
 
-                cursor.execute(insert_sql, (
+                batch.append((
                     db_category,
                     subtopic,
                     difficulty,
@@ -119,12 +122,22 @@ def ingest_dataset(gate_qa_dir, questions_per_topic=30):
                     ans,
                     f"Correct Answer: Option {ans}."
                 ))
+                existing_texts.add(q_text)
                 topic_inserted += 1
                 total_inserted += 1
 
-            conn.commit()
+                if len(batch) >= 50:
+                    cursor.executemany(insert_sql, batch)
+                    conn.commit()
+                    batch = []
+
             if topic_inserted > 0:
                 print(f"  ✓ {subtopic_name}: Added {topic_inserted} questions")
+
+        if batch:
+            cursor.executemany(insert_sql, batch)
+            conn.commit()
+            batch = []
 
     # Get final count
     cursor.execute("SELECT COUNT(*) AS total FROM aptitude_questions;")

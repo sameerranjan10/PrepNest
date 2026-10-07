@@ -48,8 +48,17 @@ def clean_topics(topics_str):
     return list(dict.fromkeys(items))  # preserve order & deduplicate
 
 def run_ingestion():
-    # 1. Clone repository if not present
-    if not os.path.exists(CLONE_DIR):
+    # 1. Clone repository if not present or missing company folders
+    has_dirs = os.path.exists(CLONE_DIR) and any(
+        os.path.isdir(os.path.join(CLONE_DIR, d)) and not d.startswith(".")
+        for d in os.listdir(CLONE_DIR)
+    )
+    if not has_dirs:
+        if os.path.exists(CLONE_DIR):
+            try:
+                shutil.rmtree(CLONE_DIR, ignore_errors=True)
+            except Exception:
+                pass
         print(f"[INFO] Cloning {REPO_URL} into {CLONE_DIR}...")
         res = subprocess.run(["git", "clone", "--depth", "1", REPO_URL, CLONE_DIR], capture_output=True, text=True)
         if res.returncode != 0:
@@ -191,8 +200,13 @@ def run_ingestion():
     print(f"[SUCCESS] Successfully ingested {inserted} problems into PostgreSQL database!")
 
     # 4. Clean up temporary clone directory
+    def remove_readonly(func, path, excinfo):
+        import stat
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
     try:
-        shutil.rmtree(CLONE_DIR, ignore_errors=True)
+        shutil.rmtree(CLONE_DIR, onerror=remove_readonly)
         print("[INFO] Cleaned up temporary clone directory.")
     except Exception as e:
         print(f"[WARN] Cleanup note: {e}")

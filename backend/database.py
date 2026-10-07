@@ -482,6 +482,7 @@ def init_db():
             category TEXT NOT NULL,
             subtopic TEXT NOT NULL,
             difficulty TEXT NOT NULL,
+            company_tag TEXT,
             question_text TEXT NOT NULL,
             option_a TEXT NOT NULL,
             option_b TEXT NOT NULL,
@@ -491,6 +492,7 @@ def init_db():
             explanation TEXT NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE aptitude_questions ADD COLUMN IF NOT EXISTS company_tag TEXT;
     """)
     
     # 3. Aptitude Test Results table
@@ -535,10 +537,34 @@ def init_db():
             topics TEXT[] DEFAULT '{}',
             companies TEXT[] DEFAULT '{}',
             company_frequencies JSONB DEFAULT '{}'::jsonb,
+            description TEXT,
+            examples JSONB DEFAULT '[]'::jsonb,
+            constraints JSONB DEFAULT '[]'::jsonb,
+            hints JSONB DEFAULT '[]'::jsonb,
+            code_snippets JSONB DEFAULT '{}'::jsonb,
+            solutions JSONB DEFAULT '{}'::jsonb,
+            editorial TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_dsa_problems_difficulty ON dsa_problems(difficulty);
+        CREATE INDEX IF NOT EXISTS idx_dsa_problems_slug ON dsa_problems(slug);
     """)
+
+    # Safe column additions if dsa_problems table already existed without rich fields
+    dsa_columns = [
+        ("description", "TEXT"),
+        ("examples", "JSONB DEFAULT '[]'::jsonb"),
+        ("constraints", "JSONB DEFAULT '[]'::jsonb"),
+        ("hints", "JSONB DEFAULT '[]'::jsonb"),
+        ("code_snippets", "JSONB DEFAULT '{}'::jsonb"),
+        ("solutions", "JSONB DEFAULT '{}'::jsonb"),
+        ("editorial", "TEXT")
+    ]
+    for col_name, col_type in dsa_columns:
+        try:
+            cursor.execute(f"ALTER TABLE dsa_problems ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+        except Exception:
+            pass
 
     # 6. User DSA Progress Table
     cursor.execute("""
@@ -554,6 +580,18 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_user_dsa_progress_user ON user_dsa_progress(user_id);
     """)
+
+    # 7. Seed demo/default user if no users exist
+    cursor.execute("SELECT COUNT(*) as count FROM users;")
+    if cursor.fetchone()["count"] == 0:
+        import hashlib
+        salt = "ai_studio_salt_2026"
+        demo_hashed = hashlib.sha256(("password123" + salt).encode('utf-8')).hexdigest()
+        cursor.execute("""
+            INSERT INTO users (email, full_name, hashed_password, plan, credits, preferred_language)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (email) DO NOTHING;
+        """, ("demo@prepnest.com", "Demo User", demo_hashed, "Pro", 250, "Python"))
     
     # Check if questions need seeding
     cursor.execute("SELECT COUNT(*) as count FROM aptitude_questions")
