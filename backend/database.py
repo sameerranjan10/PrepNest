@@ -735,6 +735,13 @@ def init_db():
     except Exception as e:
         print(f"[WARN] Gamification table initialization error: {e}")
 
+    # 11. Projects Feature Tables
+    try:
+        from projects_service import init_projects_tables
+        init_projects_tables(cursor)
+    except Exception as e:
+        print(f"[WARN] Projects table initialization error: {e}")
+
     conn.commit()
     cursor.close()
     conn.close()

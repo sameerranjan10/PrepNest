@@ -13,6 +13,12 @@ XP_RULES = {
     "daily_activity": 10,          # First learning activity of the day (+10 XP)
     "streak_bonus": 50,            # 7-day streak bonus (+50 XP)
     "dev_test": 50,                # Dev/Testing practice XP (+50 XP)
+    "project_created": 20,         # Creating a project (+20 XP)
+    "project_completed": 100,      # Completing a project (+100 XP)
+    "project_github": 20,          # Linking GitHub repository (+20 XP)
+    "project_demo": 20,            # Adding a live demo link (+20 XP)
+    "project_interview_prep": 50,  # Completing project interview prep (+50 XP)
+    "project_featured": 30,        # Featuring project in portfolio (+30 XP)
 }
 
 XP_DISPLAY_RULES = [
@@ -20,6 +26,12 @@ XP_DISPLAY_RULES = [
     {"activity": "Coding Problem", "xp": 60, "description": "Pass all test cases in the code editor"},
     {"activity": "Aptitude Quiz", "xp": 30, "description": "Complete a timed or practice aptitude test"},
     {"activity": "Mock Interview", "xp": 100, "description": "Complete an AI technical or HR mock round"},
+    {"activity": "Project Created", "xp": 20, "description": "Add a new software project to your profile"},
+    {"activity": "Project Completed", "xp": 100, "description": "Mark all milestones and finish your project"},
+    {"activity": "Project GitHub", "xp": 20, "description": "Link your project GitHub repository"},
+    {"activity": "Project Live Demo", "xp": 20, "description": "Deploy and link a working live project demo"},
+    {"activity": "Interview Prep", "xp": 50, "description": "Prepare project explanations and technical Q&A"},
+    {"activity": "Featured Project", "xp": 30, "description": "Feature your top project in your portfolio showcase"},
     {"activity": "Daily Activity", "xp": 10, "description": "Maintain your daily placement preparation"},
     {"activity": "7-Day Streak", "xp": 50, "description": "Bonus reward for 7 consecutive active days"},
 ]
@@ -31,7 +43,13 @@ ACTIVITY_LABELS = {
     "mock_interview_completed": "AI Mock Interview",
     "daily_activity": "Daily Learning Habit",
     "streak_bonus": "7-Day Consistency Streak",
-    "dev_test": "Demo Practice Exercise"
+    "dev_test": "Demo Practice Exercise",
+    "project_created": "Created Project",
+    "project_completed": "Completed Full Project",
+    "project_github": "Linked Project GitHub",
+    "project_demo": "Added Live Project Demo",
+    "project_interview_prep": "Project Interview Prep",
+    "project_featured": "Featured Project on Portfolio",
 }
 
 

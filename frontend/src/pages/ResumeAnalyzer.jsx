@@ -68,7 +68,16 @@ export default function ResumeAnalyzerPage() {
   const [jdResult, setJdResult] = useState(null);
 
   // Custom Bullet Point Improver State
-  const [customBullet, setCustomBullet] = useState('');
+  const [customBullet, setCustomBullet] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('prepnest_custom_bullet');
+      if (saved) {
+        sessionStorage.removeItem('prepnest_custom_bullet');
+        return saved;
+      }
+    } catch (e) {}
+    return '';
+  });
   const [bulletDomainFilter, setBulletDomainFilter] = useState('all');
   const [bulletImproving, setBulletImproving] = useState(false);
   const [customBulletResult, setCustomBulletResult] = useState(null);

@@ -2950,6 +2950,445 @@ def reset_dev_xp(
         conn.close()
 
 
+# =============================================================
+# PROJECTS FEATURE ENDPOINTS (Module Enhancement)
+# =============================================================
+
+from projects_service import (
+    CURATED_PROJECT_IDEAS,
+    get_user_projects,
+    get_project_stats,
+    get_project_detail,
+    create_project as service_create_project,
+    update_project as service_update_project,
+    delete_project as service_delete_project,
+    toggle_feature_project,
+    add_project_milestone,
+    update_project_milestone,
+    delete_project_milestone,
+    fetch_github_repo_metadata,
+    generate_project_interview_prep,
+    generate_project_resume_bullets,
+    seed_default_projects_if_needed,
+)
+
+class ProjectCreateRequest(BaseModel):
+    title: str
+    short_description: Optional[str] = ""
+    detailed_description: Optional[str] = ""
+    project_type: Optional[str] = "Personal"
+    project_status: Optional[str] = "In Progress"
+    start_date: Optional[str] = ""
+    end_date: Optional[str] = ""
+    tech_stack: Optional[List[str]] = []
+    key_features: Optional[List[str]] = []
+    user_role: Optional[str] = "Developer"
+    team_size: Optional[int] = 1
+    my_contribution: Optional[str] = ""
+    github_url: Optional[str] = ""
+    live_demo_url: Optional[str] = ""
+    documentation_url: Optional[str] = ""
+    demo_video_url: Optional[str] = ""
+    is_featured: Optional[bool] = False
+    milestones: Optional[List[dict]] = []
+
+
+class ProjectUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    short_description: Optional[str] = None
+    detailed_description: Optional[str] = None
+    project_type: Optional[str] = None
+    project_status: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    tech_stack: Optional[List[str]] = None
+    key_features: Optional[List[str]] = None
+    user_role: Optional[str] = None
+    team_size: Optional[int] = None
+    my_contribution: Optional[str] = None
+    github_url: Optional[str] = None
+    live_demo_url: Optional[str] = None
+    documentation_url: Optional[str] = None
+    demo_video_url: Optional[str] = None
+    is_featured: Optional[bool] = None
+
+
+class MilestoneCreateRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    due_date: Optional[str] = ""
+    is_completed: Optional[bool] = False
+
+
+class MilestoneUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+    is_completed: Optional[bool] = None
+
+
+@app.get("/api/projects")
+def list_projects(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns all projects for the authenticated student.
+    Seeds starter placement projects if the student has 0 projects.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        seed_default_projects_if_needed(uid, cursor)
+        conn.commit()
+        projects = get_user_projects(uid, cursor)
+        stats = get_project_stats(uid, cursor)
+        return {
+            "status": "success",
+            "projects": projects,
+            "stats": stats
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/projects/stats")
+def project_stats(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns Project Overview statistics (Total, Completed, In Progress, Featured, Avg Readiness).
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        stats = get_project_stats(uid, cursor)
+        return {"status": "success", "stats": stats}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/projects/ideas")
+def list_project_ideas(
+    domain: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    technology: Optional[str] = None
+):
+    """
+    Returns curated placement project ideas filterable by domain, difficulty, and technology.
+    """
+    ideas = CURATED_PROJECT_IDEAS
+    if domain and domain.lower() != "all":
+        ideas = [i for i in ideas if i["domain"].lower() == domain.lower()]
+    if difficulty and difficulty.lower() != "all":
+        ideas = [i for i in ideas if i["difficulty"].lower() == difficulty.lower()]
+    if technology and technology.lower() != "all":
+        t_clean = technology.lower()
+        ideas = [i for i in ideas if any(t_clean in t.lower() for t in i["technologies"])]
+    
+    enriched_ideas = []
+    for i in ideas:
+        idea_copy = dict(i)
+        idea_copy["suggested_technologies"] = i.get("technologies", [])
+        idea_copy["key_features"] = i.get("suggested_features", [])
+        enriched_ideas.append(idea_copy)
+
+    return {
+        "status": "success",
+        "ideas": enriched_ideas,
+        "domains": ["All", "Web Development", "AI/ML", "Cloud", "Data Science", "Cybersecurity", "IoT", "Mobile", "Blockchain"],
+        "difficulties": ["All", "Beginner", "Intermediate", "Advanced"],
+        "technologies": ["All", "React", "Python", "FastAPI", "Node.js", "PostgreSQL", "Docker", "Redis", "TypeScript", "Solidity", "React Native"]
+    }
+
+
+@app.get("/api/projects/github-sync")
+def sync_github_meta(url: str):
+    """
+    Official GitHub REST API sync for public repository metadata.
+    Strictly optional and gracefully handles rate limits and private repos.
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing repository URL")
+    res = fetch_github_repo_metadata(url)
+    return res
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns full project details. Validates user ownership.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        detail = get_project_detail(project_id, uid, cursor)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {"status": "success", "project": detail}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects")
+def create_new_project(
+    payload: ProjectCreateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Creates a new project, auto-generates interview prep & resume bullets, and awards XP.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        project = service_create_project(uid, payload.dict(), cursor)
+        conn.commit()
+        return {
+            "status": "success",
+            "project": project,
+            "message": "Project created successfully! +20 XP awarded."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/projects/{project_id}")
+def update_existing_project(
+    project_id: int,
+    payload: ProjectUpdateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Updates an existing project with strict ownership verification.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        project = service_update_project(project_id, uid, payload.dict(exclude_unset=True), cursor)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "project": project,
+            "message": "Project updated successfully."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_existing_project(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Deletes a project with strict ownership verification.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        success = service_delete_project(project_id, uid, cursor)
+        if not success:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {"status": "success", "message": "Project deleted successfully."}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/feature")
+def toggle_project_featured(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Toggles featured portfolio status.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        project = toggle_feature_project(project_id, uid, cursor)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "is_featured": project["is_featured"],
+            "project": project,
+            "message": "Portfolio feature status updated."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/interview-prep")
+def refresh_project_interview_prep(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Generates and saves structured interview preparation for this project.
+    Awards +50 XP on completion.
+    """
+    from gamification import award_xp
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        detail = get_project_detail(project_id, uid, cursor)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        
+        prep = generate_project_interview_prep(detail)
+        cursor.execute("UPDATE user_projects SET interview_prep = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (json.dumps(prep), project_id))
+        award_xp(uid, "project_interview_prep", reference_id=f"proj_prep_{project_id}", cursor=cursor)
+        conn.commit()
+        return {
+            "status": "success",
+            "interview_prep": prep,
+            "message": "Interview preparation generated! +50 XP awarded."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/resume-bullets")
+def refresh_project_resume_bullets(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Generates tailored, action-oriented resume bullet points strictly from project information.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        detail = get_project_detail(project_id, uid, cursor)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        
+        bullets = generate_project_resume_bullets(detail)
+        cursor.execute("UPDATE user_projects SET resume_bullets = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (json.dumps(bullets), project_id))
+        conn.commit()
+        return {
+            "status": "success",
+            "bullets": bullets,
+            "resume_bullets": bullets,
+            "message": "Resume bullet points generated."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/milestones")
+def create_milestone(
+    project_id: int,
+    payload: MilestoneCreateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Adds a new milestone to a project.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        milestone = add_project_milestone(project_id, uid, payload.dict(), cursor)
+        if not milestone:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "milestone": milestone,
+            "message": "Milestone added."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/projects/milestones/{milestone_id}")
+def update_milestone(
+    milestone_id: int,
+    payload: MilestoneUpdateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Updates milestone title, description, or is_completed status.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        milestone = update_project_milestone(milestone_id, uid, payload.dict(exclude_unset=True), cursor)
+        if not milestone:
+            raise HTTPException(status_code=404, detail="Milestone not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "milestone": milestone,
+            "message": "Milestone updated."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/projects/milestones/{milestone_id}")
+def delete_milestone(
+    milestone_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Deletes milestone with ownership check.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        success = delete_project_milestone(milestone_id, uid, cursor)
+        if not success:
+            raise HTTPException(status_code=404, detail="Milestone not found or unauthorized")
+        conn.commit()
+        return {"status": "success", "message": "Milestone deleted."}
+    finally:
+        cursor.close()
+        conn.close()
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

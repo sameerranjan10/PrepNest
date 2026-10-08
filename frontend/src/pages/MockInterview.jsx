@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
 import {
@@ -205,8 +205,31 @@ export default function MockInterviewPage() {
   const streamRef = useRef(null);
   const recognitionRef = useRef(null);
 
-  const [interviewType, setInterviewType] =
-    useState("Technical");
+  const [projectMock, setProjectMock] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("prepnest_mock_project_data");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const allInterviewQuestions = useMemo(() => {
+    const base = { ...INTERVIEW_QUESTIONS };
+    if (projectMock && projectMock.questions && projectMock.questions.length > 0) {
+      base["Project"] = projectMock.questions;
+    }
+    return base;
+  }, [projectMock]);
+
+  const [interviewType, setInterviewType] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("prepnest_mock_project_data");
+      return saved ? "Project" : "Technical";
+    } catch {
+      return "Technical";
+    }
+  });
 
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
@@ -232,7 +255,7 @@ export default function MockInterviewPage() {
   const [results, setResults] = useState(null);
 
   const questions =
-    INTERVIEW_QUESTIONS[interviewType];
+    allInterviewQuestions[interviewType] || INTERVIEW_QUESTIONS.Technical;
 
   /* =======================================================
      TIMER
@@ -1109,10 +1132,10 @@ export default function MockInterviewPage() {
                   Select the type of interview you want to practice.
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
 
                   {Object.keys(
-                    INTERVIEW_QUESTIONS
+                    allInterviewQuestions
                   ).map((type) => (
 
                     <button
@@ -1140,11 +1163,15 @@ export default function MockInterviewPage() {
                       />
 
                       <p className="text-sm font-bold text-white mt-3">
-                        {type}
+                        {type === 'Project' && projectMock?.projectTitle
+                          ? `Project Defense`
+                          : type}
                       </p>
 
                       <p className="text-xs text-slate-400 mt-1">
-                        5 questions
+                        {type === 'Project' && projectMock?.projectTitle
+                          ? projectMock.projectTitle
+                          : `${allInterviewQuestions[type]?.length || 5} questions`}
                       </p>
 
                     </button>
