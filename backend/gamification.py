@@ -24,6 +24,16 @@ XP_DISPLAY_RULES = [
     {"activity": "7-Day Streak", "xp": 50, "description": "Bonus reward for 7 consecutive active days"},
 ]
 
+ACTIVITY_LABELS = {
+    "dsa_solved": "Solved DSA Problem",
+    "coding_solved": "Passed Coding Challenge",
+    "aptitude_completed": "Completed Aptitude Quiz",
+    "mock_interview_completed": "AI Mock Interview",
+    "daily_activity": "Daily Learning Habit",
+    "streak_bonus": "7-Day Consistency Streak",
+    "dev_test": "Demo Practice Exercise"
+}
+
 
 def init_gamification_tables(cursor):
     """
@@ -352,6 +362,27 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
     cursor.execute(query)
     raw_users = cursor.fetchall()
 
+    # Fetch recent activities for learners
+    cursor.execute("""
+        WITH ranked_tx AS (
+            SELECT user_id, activity_type, amount, created_at,
+                   ROW_NUMBER() OVER(PARTITION BY user_id ORDER BY created_at DESC) as rn
+            FROM xp_transactions
+        )
+        SELECT user_id, activity_type, amount, created_at
+        FROM ranked_tx
+        WHERE rn <= 4;
+    """)
+    recent_rows = cursor.fetchall()
+    user_recent_map = {}
+    for r in recent_rows:
+        user_recent_map.setdefault(r["user_id"], []).append({
+            "type": r["activity_type"],
+            "title": ACTIVITY_LABELS.get(r["activity_type"], r["activity_type"].replace("_", " ").title()),
+            "amount": r["amount"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else ""
+        })
+
     rankings = []
     current_user_card = None
 
@@ -409,6 +440,7 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             "aptitude": apt_metric,
             "interview": interview_metric,
             "badges": badges,
+            "recent_activities": user_recent_map.get(uid, []),
             "is_current_user": is_current
         }
 
@@ -448,6 +480,7 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
                 "aptitude": 65,
                 "interview": 60,
                 "badges": ["Rising Star"],
+                "recent_activities": user_recent_map.get(current_user_id, []),
                 "is_current_user": True
             }
 
