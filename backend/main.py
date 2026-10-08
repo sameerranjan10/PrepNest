@@ -18,6 +18,14 @@ from auth import (
 )
 
 from database import get_db_connection, init_db
+from gamification import (
+    award_xp,
+    get_leaderboard_data,
+    calculate_level,
+    calculate_streak,
+    get_user_readiness,
+    XP_RULES,
+)
 from resume_service import (
     full_resume_analysis,
     get_available_companies_and_roles,
@@ -944,6 +952,15 @@ def submit_aptitude_test(
                     (user_id, res_item["id"], q_status, res_item.get("selected_option"))
                 )
 
+        # Award central XP (Module 9 Requirement: Aptitude Quiz +30 XP)
+        xp_res = award_xp(
+            user_id=user_id,
+            activity_type="aptitude_completed",
+            reference_id=f"apt_test_{result_id}",
+            cursor=cursor
+        )
+        xp_earned = xp_res.get("xp_earned", 30)
+
         conn.commit()
 
     except Exception:
@@ -953,13 +970,6 @@ def submit_aptitude_test(
     finally:
         cursor.close()
         conn.close()
-
-    # XP calculation
-    xp_earned = (
-        correct_count * 25
-    ) + (
-        10 if score_percentage >= 80 else 0
-    )
 
     return {
         "result_id": result_id,
@@ -1461,6 +1471,17 @@ def solve_single_question(payload: SingleSolveRequest):
             """,
             (payload.user_id or 1, payload.question_id, status, selected)
         )
+
+        xp_earned = 0
+        if is_correct:
+            xp_res = award_xp(
+                user_id=payload.user_id or 1,
+                activity_type="aptitude_completed",
+                reference_id=f"apt_q_{payload.question_id}",
+                cursor=cursor
+            )
+            xp_earned = xp_res.get("xp_earned", 30)
+
         conn.commit()
     finally:
         cursor.close()
@@ -1472,7 +1493,7 @@ def solve_single_question(payload: SingleSolveRequest):
         "correct_option": correct,
         "is_correct": is_correct,
         "status": status,
-        "xp_earned": 25 if is_correct else 0,
+        "xp_earned": xp_earned,
         "explanation": q["explanation"]
     }
 
@@ -1704,16 +1725,25 @@ def toggle_dsa_solved(payload: DSAToggleSolvedRequest):
             (payload.user_id or 1, payload.problem_id)
         )
         row = cursor.fetchone()
+        is_solved = row["is_solved"]
+        xp_earned = 0
+        if is_solved:
+            xp_res = award_xp(
+                user_id=payload.user_id or 1,
+                activity_type="dsa_solved",
+                reference_id=f"dsa_{payload.problem_id}",
+                cursor=cursor
+            )
+            xp_earned = xp_res.get("xp_earned", 50)
         conn.commit()
     finally:
         cursor.close()
         conn.close()
 
-    is_solved = row["is_solved"]
     return {
         "problem_id": payload.problem_id,
         "is_solved": is_solved,
-        "xp_earned": 25 if is_solved else 0
+        "xp_earned": xp_earned
     }
 
 
@@ -1929,6 +1959,15 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
             """,
             (payload.user_id or 1, payload.problem_id)
         )
+
+        xp_res = award_xp(
+            user_id=payload.user_id or 1,
+            activity_type="coding_solved",
+            reference_id=f"code_{payload.problem_id}",
+            cursor=cursor
+        )
+        xp_earned = xp_res.get("xp_earned", 60)
+
         conn.commit()
     finally:
         cursor.close()
@@ -1937,8 +1976,8 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
     return {
         "problem_id": payload.problem_id,
         "status": "Accepted",
-        "xp_earned": 25,
-        "message": "All test cases passed! +25 XP awarded."
+        "xp_earned": xp_earned,
+        "message": f"All test cases passed! +{xp_earned} XP awarded."
     }
 
 
@@ -2714,6 +2753,197 @@ def get_roadmap_recommendations(
             "target_role": target_role,
             "target_company": target_company,
             "recommendations": recommendations[:5]
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# =============================================================
+# GAMIFICATION & LEADERBOARD ENDPOINTS (Module 9 Requirement)
+# =============================================================
+
+class MockInterviewCompleteRequest(BaseModel):
+    user_id: Optional[int] = None
+    category: str = "Technical"
+    score: int
+    average_words: Optional[int] = 0
+    keyword_matches: Optional[int] = 0
+    strengths: Optional[List[str]] = []
+    improvements: Optional[List[str]] = []
+
+
+@app.post("/api/interviews/complete")
+def record_mock_interview(
+    payload: MockInterviewCompleteRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Records an AI mock interview completion and awards +100 XP centrally.
+    Updates daily learning activity and continuous streak.
+    """
+    uid = resolve_roadmap_user_id(authorization, payload.user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO mock_interview_results 
+            (user_id, category, score, average_words, keyword_matches, strengths, improvements, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            RETURNING id;
+        """, (
+            uid,
+            payload.category,
+            payload.score,
+            payload.average_words or 0,
+            payload.keyword_matches or 0,
+            json.dumps(payload.strengths or []),
+            json.dumps(payload.improvements or [])
+        ))
+        res_row = cursor.fetchone()
+        interview_id = res_row["id"]
+
+        xp_res = award_xp(
+            user_id=uid,
+            activity_type="mock_interview_completed",
+            reference_id=f"mock_{interview_id}",
+            cursor=cursor
+        )
+        conn.commit()
+        return {
+            "status": "success",
+            "interview_id": interview_id,
+            "xp_earned": xp_res.get("xp_earned", 100),
+            "total_xp": xp_res.get("total_xp", 100),
+            "streak": xp_res.get("streak", 1),
+            "message": "Mock interview completed! +100 XP awarded."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/leaderboard")
+def get_leaderboard(
+    period: str = "overall",
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Single source of truth leaderboard endpoint.
+    Returns:
+      - Current user card (Rank, Level, XP, Problems, Streak, Readiness)
+      - Top 3 performers for selected period
+      - Complete rankings list sorted deterministically
+      - XP rules and period metadata
+    Supported periods: 'weekly', 'monthly', 'overall'
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        data = get_leaderboard_data(period=period, current_user_id=uid, cursor=cursor)
+        return data
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/leaderboard/me")
+def get_my_leaderboard(
+    period: str = "overall",
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns current user leaderboard summary for the requested period.
+    """
+    uid = resolve_roadmap_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        data = get_leaderboard_data(period=period, current_user_id=uid, cursor=cursor)
+        return {
+            "period": period,
+            "user": data.get("current_user"),
+            "highest_xp": data.get("highest_xp")
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+class DevXpRequest(BaseModel):
+    user_id: Optional[int] = None
+    amount: Optional[int] = 50
+
+
+@app.post("/api/leaderboard/dev-xp")
+def earn_dev_xp(
+    payload: Optional[DevXpRequest] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Development & Testing endpoint: Awards demo XP safely to test real-time leaderboard rank changes.
+    Uses 'dev_test' activity_type to isolate from production activities.
+    """
+    req_uid = payload.user_id if payload else None
+    uid = resolve_roadmap_user_id(authorization, req_uid)
+    amount = payload.amount if (payload and payload.amount) else 50
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        import time
+        ref_id = f"dev_test_{uid}_{int(time.time() * 1000)}"
+        xp_res = award_xp(
+            user_id=uid,
+            activity_type="dev_test",
+            reference_id=ref_id,
+            custom_amount=amount,
+            cursor=cursor
+        )
+        conn.commit()
+        return {
+            "status": "success",
+            "xp_awarded": xp_res.get("xp_earned", amount),
+            "total_xp": xp_res.get("total_xp", amount),
+            "streak": xp_res.get("streak", 1),
+            "message": f"+{amount} Demo XP awarded for development testing."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/leaderboard/dev-reset")
+def reset_dev_xp(
+    payload: Optional[DevXpRequest] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Development & Testing endpoint: Safely clears ONLY 'dev_test' activity transactions.
+    Real DSA, coding, aptitude, and interview XP are never deleted.
+    """
+    req_uid = payload.user_id if payload else None
+    uid = resolve_roadmap_user_id(authorization, req_uid)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM xp_transactions WHERE user_id = %s AND activity_type = 'dev_test';",
+            (uid,)
+        )
+        cursor.execute("""
+            UPDATE users 
+            SET total_xp = (SELECT COALESCE(SUM(amount), 0) FROM xp_transactions WHERE user_id = %s)
+            WHERE id = %s
+            RETURNING total_xp;
+        """, (uid, uid))
+        updated = cursor.fetchone()
+        conn.commit()
+        return {
+            "status": "success",
+            "total_xp": updated["total_xp"] if updated else 0,
+            "message": "Demo XP reset completed safely without affecting real progress."
         }
     finally:
         cursor.close()

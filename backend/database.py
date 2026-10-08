@@ -727,6 +727,14 @@ def init_db():
                 q["explanation"]
             ))
             
+    # 10. Gamification Tables (Module 9 Requirement)
+    try:
+        from gamification import init_gamification_tables, seed_campus_cohort_if_needed
+        init_gamification_tables(cursor)
+        seed_campus_cohort_if_needed(cursor)
+    except Exception as e:
+        print(f"[WARN] Gamification table initialization error: {e}")
+
     conn.commit()
     cursor.close()
     conn.close()

@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
+import { useAuth } from "@/context/AuthContext";
 import {
   Trophy,
   Crown,
@@ -30,11 +31,14 @@ import {
   Plus,
   Lock,
   X,
+  Loader2,
 } from "lucide-react";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const CURRENT_USER_ID = 4;
 
@@ -252,9 +256,11 @@ function loadUsers() {
 }
 
 function getScore(user, period) {
-  if (period === "weekly") return user.weeklyXp;
-  if (period === "monthly") return user.monthlyXp;
-  return user.xp;
+  if (!user) return 0;
+  if (user.period_xp !== undefined) return user.period_xp;
+  if (period === "weekly" && user.weeklyXp !== undefined) return user.weeklyXp;
+  if (period === "monthly" && user.monthlyXp !== undefined) return user.monthlyXp;
+  return user.xp || 0;
 }
 
 function getLevel(xp) {
@@ -296,7 +302,12 @@ function getRankIcon(rank) {
 ========================================================= */
 
 export default function LeaderboardPage() {
+  const { user: authUser, token } = useAuth();
   const [users, setUsers] = useState(loadUsers);
+  const [backendCurrentUser, setBackendCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [xpRules, setXpRules] = useState([]);
 
   const [period, setPeriod] =
     useState("all");
@@ -312,6 +323,44 @@ export default function LeaderboardPage() {
 
   const [showStats, setShowStats] =
     useState(false);
+
+  /* =======================================================
+     FETCH LIVE DATA
+  ======================================================= */
+
+  const fetchLeaderboard = useCallback(async () => {
+    try {
+      setLoading(true);
+      const apiPeriod = period === "all" ? "overall" : period;
+      const headers = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/api/leaderboard?period=${apiPeriod}`, {
+        headers,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rankings && data.rankings.length > 0) {
+          setUsers(data.rankings);
+        }
+        if (data.current_user) {
+          setBackendCurrentUser(data.current_user);
+        }
+        if (data.xp_rules) {
+          setXpRules(data.xp_rules);
+        }
+      }
+    } catch (err) {
+      console.warn("Using offline/cached leaderboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [period, token]);
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
 
   /* =======================================================
      SAVE
@@ -335,10 +384,12 @@ export default function LeaderboardPage() {
   ======================================================= */
 
   const currentUser =
-    users.find(
-      (user) =>
-        user.id === CURRENT_USER_ID
-    ) || users[0];
+    backendCurrentUser ||
+    users.find((u) => u.is_current_user) ||
+    users.find((u) => authUser && (u.id === authUser.id || u.email === authUser.email)) ||
+    users.find((u) => u.id === CURRENT_USER_ID) ||
+    users[0] ||
+    DEFAULT_USERS[0];
 
   /* =======================================================
      FILTER + SORT
@@ -445,11 +496,30 @@ export default function LeaderboardPage() {
      SIMULATE XP
   ======================================================= */
 
-  const simulateXP = () => {
+  const simulateXP = async () => {
+    setActionLoading(true);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/api/leaderboard/dev-xp`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ amount: 100 }),
+      });
+      if (res.ok) {
+        await fetchLeaderboard();
+        return;
+      }
+    } catch (err) {
+      console.warn("simulateXP API error, falling back locally:", err);
+    } finally {
+      setActionLoading(false);
+    }
+
     const updated = users.map(
       (user) => {
         if (
-          user.id !== CURRENT_USER_ID
+          user.id !== (currentUser?.id || CURRENT_USER_ID)
         ) {
           return user;
         }
@@ -461,16 +531,13 @@ export default function LeaderboardPage() {
 
         return {
           ...user,
-          xp: user.xp + earned,
+          xp: (user.xp || 0) + earned,
           weeklyXp:
-            user.weeklyXp + earned,
+            (user.weeklyXp || user.xp || 0) + earned,
           monthlyXp:
-            user.monthlyXp + earned,
+            (user.monthlyXp || user.xp || 0) + earned,
           problems:
-            user.problems +
-            (Math.random() > 0.65
-              ? 1
-              : 0),
+            (user.problems || 0) + 1,
         };
       }
     );
@@ -482,13 +549,31 @@ export default function LeaderboardPage() {
      RESET
   ======================================================= */
 
-  const resetLeaderboard = () => {
+  const resetLeaderboard = async () => {
     const confirmed =
       window.confirm(
         "Reset leaderboard demo data?"
       );
 
     if (!confirmed) return;
+
+    setActionLoading(true);
+    try {
+      const headers = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/api/leaderboard/dev-reset`, {
+        method: "POST",
+        headers,
+      });
+      if (res.ok) {
+        await fetchLeaderboard();
+        return;
+      }
+    } catch (err) {
+      console.warn("resetLeaderboard API error, resetting locally:", err);
+    } finally {
+      setActionLoading(false);
+    }
 
     updateUsers(DEFAULT_USERS);
   };
@@ -572,15 +657,21 @@ export default function LeaderboardPage() {
 
               <button
                 onClick={simulateXP}
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 rounded-xl text-xs font-bold transition"
+                disabled={actionLoading}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2.5 rounded-xl text-xs font-bold transition"
               >
-                <Plus className="w-4 h-4" />
+                {actionLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
                 Earn Demo XP
               </button>
 
               <button
                 onClick={resetLeaderboard}
-                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 transition"
+                disabled={actionLoading}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 transition"
               >
                 <RotateCcw className="w-4 h-4" />
                 Reset

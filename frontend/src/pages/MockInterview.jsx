@@ -795,6 +795,29 @@ export default function MockInterviewPage() {
       averageWords,
     });
 
+    // Award +100 XP centrally via backend API (Module 9 Requirement)
+    try {
+      const token = localStorage.getItem('prepnest_token');
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      fetch(`${API_BASE}/api/interviews/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          category: interviewType,
+          score: totalScore,
+          average_words: averageWords,
+          keyword_matches: keywordMatches,
+          strengths,
+          improvements
+        })
+      }).catch(err => console.warn('Mock interview XP recording error:', err));
+    } catch (e) {
+      // Ignore background fetch failure
+    }
+
     setFinished(true);
     setStarted(false);
     setIsAnswering(false);
