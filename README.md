@@ -15,7 +15,7 @@
   <strong>An AI-powered web-based placement preparation platform enabling students to master DSA, practice aptitude tests, analyze resumes against ATS algorithms, ace AI mock interviews, and access company-specific recruitment tracks in a unified ecosystem.</strong>
 </p>
 
-[Project Details](#-project-details) • [Introduction & Scope](#-introduction--scope) • [Product Modules](#-product-modules) • [Functional Requirements](#-functional-requirements) • [Tech Stack](#-tech-stack-and-system-environment) • [Project Structure](#-project-structure) • [Getting Started](#-getting-started) • [API Documentation](#-api-documentation) • [Application Routes](#-application-routes) • [Future Scope](#-future-scope)
+[Architecture & Docs](docs/README.md) • [Project Details](#-project-details) • [Introduction & Scope](#-introduction--scope) • [Product Modules](#-product-modules) • [Functional Requirements](#-functional-requirements) • [Tech Stack](#-tech-stack-and-system-environment) • [Project Structure](#-project-structure) • [Getting Started](#-getting-started) • [API Documentation](#-api-documentation) • [Application Routes](#-application-routes) • [Future Scope](#-future-scope)
 
 </div>
 
@@ -192,6 +192,13 @@ Dev & DevOps:   Docker, Postman, Visual Studio Code, Git, GitHub
 
 ```text
 PrepNest-main/
+├── docs/                    # Architecture, coding standards, roadmap & AI instructions
+│   ├── README.md            # Documentation index & maintenance lifecycle
+│   ├── project-brief.md     # Vision, problem statement, personas & KPIs
+│   ├── architecture.md      # System topology, tech stack, data flows & ER schema
+│   ├── coding-standards.md  # Python/FastAPI, React/Tailwind & security guidelines
+│   ├── roadmap.md           # Milestones, active sprint & feature backlog
+│   └── ai-instructions.md   # Ground-truth rules & operational prompt for AI agents
 ├── backend/
 │   ├── auth.py              # JWT token generation, verification & bcrypt password hashing
 │   ├── database.py          # SQLite / PostgreSQL database connection & table schema
