@@ -12,7 +12,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
 db_url = os.getenv("DATABASE_URL")
 
 SCRATCH_DIR = r"C:\Users\vivek\.gemini\antigravity\brain\6b3b0b1d-ef9c-457c-81e1-344f1cfd1603\scratch"

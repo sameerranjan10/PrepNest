@@ -171,22 +171,37 @@ def health_check():
 # -------------------------------------------------------------
 
 @app.post("/api/auth/register", response_model=TokenResponse)
-def register_user(user_data: UserRegister):
+def register_user(user_data: UserRegister, origin: Optional[str] = Header(None)):
     conn = get_db_connection()
     cursor = conn.cursor()
 
     email = user_data.email.lower().strip()
     full_name = user_data.full_name.strip()
+    req_origin = origin or "http://localhost:5173"
 
     # 1. Register with Neon Auth
-    neon_success, neon_data, neon_err = neon_auth_sign_up(full_name, email, user_data.password)
+    neon_success, neon_data, neon_err = neon_auth_sign_up(full_name, email, user_data.password, origin=req_origin)
     if not neon_success:
-        cursor.close()
-        conn.close()
-        raise HTTPException(
-            status_code=400,
-            detail=neon_err or "Registration failed on Neon Auth"
-        )
+        # If user already exists in Neon Auth, attempt sign in or report clean message
+        if neon_err and ("already exists" in neon_err.lower() or "user_already_exists" in neon_err.lower()):
+            succ, sdata, serr = neon_auth_sign_in(email, user_data.password, origin=req_origin)
+            if succ and sdata:
+                neon_success = True
+                neon_data = sdata
+            else:
+                cursor.close()
+                conn.close()
+                raise HTTPException(
+                    status_code=400,
+                    detail="An account with this email already exists. Please log in instead."
+                )
+        else:
+            cursor.close()
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail=neon_err or "Registration failed on Neon Auth"
+            )
 
     neon_token = neon_data.get("token") if neon_data else None
 
@@ -232,8 +247,9 @@ def register_user(user_data: UserRegister):
 # -------------------------------------------------------------
 
 @app.post("/api/auth/login", response_model=TokenResponse)
-def login_user(user_data: UserLogin):
+def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
     email = user_data.email.lower().strip()
+    req_origin = origin or "http://localhost:5173"
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -241,7 +257,7 @@ def login_user(user_data: UserLogin):
     neon_user = None
 
     # 1. Attempt authentication with Neon Auth
-    neon_success, neon_data, neon_err = neon_auth_sign_in(email, user_data.password)
+    neon_success, neon_data, neon_err = neon_auth_sign_in(email, user_data.password, origin=req_origin)
     if neon_success and neon_data:
         neon_token = neon_data.get("token")
         neon_user = neon_data.get("user")
@@ -251,10 +267,11 @@ def login_user(user_data: UserLogin):
         legacy_row = cursor.fetchone()
         if legacy_row and verify_password(user_data.password, legacy_row.get("hashed_password", "")):
             full_name = legacy_row.get("full_name") or "PrepNest Student"
-            neon_auth_sign_up(full_name, email, user_data.password)
-            succ, sdata, _ = neon_auth_sign_in(email, user_data.password)
+            neon_auth_sign_up(full_name, email, user_data.password, origin=req_origin)
+            succ, sdata, _ = neon_auth_sign_in(email, user_data.password, origin=req_origin)
             if succ and sdata:
                 neon_token = sdata.get("token")
+                neon_user = sdata.get("user")
         else:
             cursor.close()
             conn.close()

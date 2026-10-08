@@ -48,7 +48,7 @@ NEON_AUTH_URL = os.getenv(
 ).rstrip("/")
 
 
-def neon_auth_sign_up(name: str, email: str, password: str) -> tuple[bool, Optional[dict], Optional[str]]:
+def neon_auth_sign_up(name: str, email: str, password: str, origin: Optional[str] = None) -> tuple[bool, Optional[dict], Optional[str]]:
     """
     Registers a new user via Neon Auth (/sign-up/email).
     Returns (success, response_data, error_message).
@@ -65,7 +65,8 @@ def neon_auth_sign_up(name: str, email: str, password: str) -> tuple[bool, Optio
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "PrepNest-Backend/1.0"
+            "User-Agent": "PrepNest-Backend/1.0",
+            "Origin": origin or "http://localhost:5173"
         }
     )
 
@@ -84,7 +85,7 @@ def neon_auth_sign_up(name: str, email: str, password: str) -> tuple[bool, Optio
         return False, None, f"Could not connect to Neon Auth: {str(e)}"
 
 
-def neon_auth_sign_in(email: str, password: str) -> tuple[bool, Optional[dict], Optional[str]]:
+def neon_auth_sign_in(email: str, password: str, origin: Optional[str] = None) -> tuple[bool, Optional[dict], Optional[str]]:
     """
     Authenticates a user via Neon Auth (/sign-in/email).
     Returns (success, response_data, error_message).
@@ -100,7 +101,8 @@ def neon_auth_sign_in(email: str, password: str) -> tuple[bool, Optional[dict], 
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "PrepNest-Backend/1.0"
+            "User-Agent": "PrepNest-Backend/1.0",
+            "Origin": origin or "http://localhost:5173"
         }
     )
 
