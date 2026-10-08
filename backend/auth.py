@@ -31,3 +31,113 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except jwt.PyJWTError:
         return None
+
+
+# -------------------------------------------------------------
+# Neon Authentication Integration (Managed Better Auth)
+# -------------------------------------------------------------
+
+import os
+import json
+import urllib.request
+import urllib.error
+
+NEON_AUTH_URL = os.getenv(
+    "NEON_AUTH_URL",
+    "https://ep-purple-lab-b3uwg1re.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth"
+).rstrip("/")
+
+
+def neon_auth_sign_up(name: str, email: str, password: str) -> tuple[bool, Optional[dict], Optional[str]]:
+    """
+    Registers a new user via Neon Auth (/sign-up/email).
+    Returns (success, response_data, error_message).
+    """
+    url = f"{NEON_AUTH_URL}/sign-up/email"
+    payload = json.dumps({
+        "name": name,
+        "email": email.lower().strip(),
+        "password": password
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "PrepNest-Backend/1.0"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return True, data, None
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = json.loads(e.read().decode("utf-8"))
+            msg = err_body.get("message") or err_body.get("error") or str(err_body)
+        except Exception:
+            msg = f"Neon Auth error HTTP {e.code}"
+        return False, None, msg
+    except Exception as e:
+        return False, None, f"Could not connect to Neon Auth: {str(e)}"
+
+
+def neon_auth_sign_in(email: str, password: str) -> tuple[bool, Optional[dict], Optional[str]]:
+    """
+    Authenticates a user via Neon Auth (/sign-in/email).
+    Returns (success, response_data, error_message).
+    """
+    url = f"{NEON_AUTH_URL}/sign-in/email"
+    payload = json.dumps({
+        "email": email.lower().strip(),
+        "password": password
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "PrepNest-Backend/1.0"
+        }
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return True, data, None
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = json.loads(e.read().decode("utf-8"))
+            msg = err_body.get("message") or err_body.get("error") or str(err_body)
+        except Exception:
+            msg = f"Neon Auth error HTTP {e.code}"
+        return False, None, msg
+    except Exception as e:
+        return False, None, f"Could not connect to Neon Auth: {str(e)}"
+
+
+def verify_neon_session(token: str, cursor) -> Optional[dict]:
+    """
+    Directly checks the neon_auth.session table in Neon PostgreSQL.
+    Returns session dict with email, name, neon_user_id if valid and not expired.
+    """
+    if not token:
+        return None
+    try:
+        cursor.execute("""
+            SELECT s.token, s."expiresAt", u.id AS neon_user_id, u.email, u.name
+            FROM neon_auth.session s
+            JOIN neon_auth.user u ON s."userId" = u.id
+            WHERE s.token = %s AND s."expiresAt" > CURRENT_TIMESTAMP;
+        """, (token,))
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    except Exception:
+        # neon_auth schema might not exist or error
+        pass
+    return None
+

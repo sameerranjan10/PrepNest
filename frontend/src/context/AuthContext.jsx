@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
@@ -18,7 +20,7 @@ export const AuthProvider = ({ children }) => {
 
   const [loading, setLoading] = useState(true);
 
-  // Sync / refresh user data from backend on mount if token is present
+  // Sync / verify user session with backend & Neon Auth on mount
   useEffect(() => {
     const fetchCurrentUser = async () => {
       const savedToken = localStorage.getItem('prepnest_token');
@@ -28,7 +30,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       try {
-        const res = await fetch('http://localhost:8000/api/auth/me', {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
           headers: {
             'Authorization': `Bearer ${savedToken}`,
             'Content-Type': 'application/json'
@@ -61,6 +63,15 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    const savedToken = localStorage.getItem('prepnest_token') || token;
+    if (savedToken) {
+      try {
+        fetch(`${API_BASE}/api/auth/logout`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${savedToken}` }
+        }).catch(() => {});
+      } catch {}
+    }
     setUser(null);
     setToken(null);
     localStorage.removeItem('prepnest_token');
@@ -79,7 +90,7 @@ export const AuthProvider = ({ children }) => {
     const savedToken = localStorage.getItem('prepnest_token') || token;
     if (savedToken) {
       try {
-        const res = await fetch('http://localhost:8000/api/user/profile', {
+        const res = await fetch(`${API_BASE}/api/user/profile`, {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${savedToken}`,
@@ -99,12 +110,10 @@ export const AuthProvider = ({ children }) => {
         }
       } catch (err) {
         console.warn('Backend update failed, saving locally:', err.message);
-        // Fallback to local update
         updateUser(profileData);
         return { success: true, user: { ...user, ...profileData }, warning: err.message };
       }
     } else {
-      // Guest or local mode
       updateUser(profileData);
       return { success: true, user: { ...user, ...profileData } };
     }
@@ -116,7 +125,7 @@ export const AuthProvider = ({ children }) => {
       throw new Error('You must be logged in to change your password');
     }
 
-    const res = await fetch('http://localhost:8000/api/user/password', {
+    const res = await fetch(`${API_BASE}/api/user/password`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${savedToken}`,
@@ -153,7 +162,6 @@ export const AuthProvider = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
-
 };
 
 export const useAuth = () => {

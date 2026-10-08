@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
+import QuestionDirectory from '@/components/QuestionDirectory';
 import { 
   APTITUDE_CATEGORIES, 
   FALLBACK_APTITUDE_QUESTIONS, 
@@ -35,12 +37,17 @@ import {
   ShieldCheck,
   Filter,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Building2
 } from 'lucide-react';
 
 export default function AptitudePage() {
+  const [searchParams] = useSearchParams();
+  const companyFromUrl = searchParams.get('company');
+
   // Navigation & View Mode: 'hub' | 'test' | 'results' | 'review'
   const [viewMode, setViewMode] = useState('hub');
+  const [activeHubTab, setActiveHubTab] = useState('directory'); // 'directory' | 'assessments'
 
   // Categories & Question Bank State
   const [categories, setCategories] = useState(APTITUDE_CATEGORIES);
@@ -79,9 +86,22 @@ export default function AptitudePage() {
   // Quiz Configuration Modal State
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [selectedCategoryConfig, setSelectedCategoryConfig] = useState('all');
+  const [selectedCompanyConfig, setSelectedCompanyConfig] = useState(companyFromUrl || 'all');
+  const [selectedSubtopicConfig, setSelectedSubtopicConfig] = useState('all');
+  const [availableCompanies, setAvailableCompanies] = useState([
+    'TCS', 'Infosys', 'Wipro', 'Accenture', 'Cognizant', 'Capgemini', 'Amazon', 'Google', 'Microsoft', 'Deloitte'
+  ]);
   const [questionCountConfig, setQuestionCountConfig] = useState(10);
   const [difficultyConfig, setDifficultyConfig] = useState('all');
   const [timerModeConfig, setTimerModeConfig] = useState('standard'); // 'standard' (60s/q), 'blitz' (30s/q), 'untimed'
+
+  // Handle Company Trigger from URL
+  useEffect(() => {
+    if (companyFromUrl) {
+      setSelectedCompanyConfig(companyFromUrl);
+      setIsConfigModalOpen(true);
+    }
+  }, [companyFromUrl]);
 
   // Active Test State
   const [activeTestCategory, setActiveTestCategory] = useState('all');
@@ -128,6 +148,9 @@ export default function AptitudePage() {
             return apiCat ? { ...localCat, ...apiCat } : localCat;
           });
           setCategories(merged);
+        }
+        if (data.companies && data.companies.length > 0) {
+          setAvailableCompanies(data.companies);
         }
         if (data.overall_stats) {
           setOverallStats(data.overall_stats);
@@ -203,7 +226,14 @@ export default function AptitudePage() {
   }, [viewMode, currentQuestionIndex, testQuestions, userAnswers, isSubmitModalOpen]);
 
   // Launch Quiz from Preset or Config Modal
-  const startQuiz = async (categoryId = 'all', count = 10, difficulty = 'all', timerMode = 'standard') => {
+  const startQuiz = async (
+    categoryId = 'all', 
+    count = 10, 
+    difficulty = 'all', 
+    timerMode = 'standard',
+    company = selectedCompanyConfig,
+    subtopic = selectedSubtopicConfig
+  ) => {
     setActiveTestCategory(categoryId);
     setIsConfigModalOpen(false);
     setUserAnswers({});
@@ -221,7 +251,13 @@ export default function AptitudePage() {
     // Fetch questions from backend or use local fallback
     let questions = [];
     try {
-      const url = `http://localhost:8000/api/aptitude/questions?category=${categoryId}&limit=${count}&difficulty=${difficulty}`;
+      let url = `http://localhost:8000/api/aptitude/questions?category=${categoryId}&limit=${count}&difficulty=${difficulty}`;
+      if (company && company !== 'all') {
+        url += `&company=${encodeURIComponent(company)}`;
+      }
+      if (subtopic && subtopic !== 'all') {
+        url += `&subtopic=${encodeURIComponent(subtopic)}`;
+      }
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -468,20 +504,58 @@ export default function AptitudePage() {
               </div>
             </div>
 
-            {/* Category Cards Section */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Layers className="w-5 h-5 text-indigo-400" />
-                    <span>Aptitude Domains & Categories</span>
-                  </h2>
-                  <p className="text-xs text-slate-400">Select a specific area or train across all core assessment pillars.</p>
-                </div>
-              </div>
+            {/* Hub Mode Switcher Tabs */}
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <button
+                onClick={() => setActiveHubTab('directory')}
+                className={`px-5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 ${
+                  activeHubTab === 'directory'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                    : 'bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" />
+                <span>📚 Question Directory & Module Tracker</span>
+              </button>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {categories.map((cat) => {
+              <button
+                onClick={() => setActiveHubTab('assessments')}
+                className={`px-5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 ${
+                  activeHubTab === 'assessments'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                    : 'bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <Clock className="w-4 h-4" />
+                <span>🎯 Timed Mock Assessments & Tests</span>
+              </button>
+            </div>
+
+            {activeHubTab === 'directory' ? (
+              <QuestionDirectory
+                availableCompanies={availableCompanies}
+                categories={categories}
+                initialCompany={companyFromUrl || 'all'}
+                onStartQuiz={(cat, count, diff, mode, comp, sub) =>
+                  startQuiz(cat, count, diff, mode, comp, sub)
+                }
+              />
+            ) : (
+              <>
+                {/* Category Cards Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <Layers className="w-5 h-5 text-indigo-400" />
+                        <span>Aptitude Domains & Categories</span>
+                      </h2>
+                      <p className="text-xs text-slate-400">Select a specific area or train across all core assessment pillars.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {categories.map((cat) => {
                   const IconComponent = cat.id === 'quantitative' ? Calculator : 
                                         cat.id === 'logical' ? BrainCircuit : BookOpen;
                   const borderGlow = cat.id === 'quantitative' ? 'hover:border-indigo-500/50' : 
@@ -666,7 +740,9 @@ export default function AptitudePage() {
                 </div>
               </div>
             </div>
-          </main>
+          </>
+        )}
+        </main>
         </div>
 
         {/* Custom Practice Config Modal */}
@@ -738,18 +814,60 @@ export default function AptitudePage() {
                 </div>
               </div>
 
+              {/* Target Company Selector */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-400" /> Target Company Track
+                  </label>
+                  {selectedCompanyConfig !== 'all' && (
+                    <button 
+                      onClick={() => setSelectedCompanyConfig('all')}
+                      className="text-[11px] text-indigo-400 hover:underline"
+                    >
+                      All Companies
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 bg-slate-950/40 rounded-xl border border-slate-800">
+                  <button
+                    onClick={() => setSelectedCompanyConfig('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
+                      selectedCompanyConfig === 'all'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700/60 hover:text-white'
+                    }`}
+                  >
+                    🏢 All Companies
+                  </button>
+                  {availableCompanies.map(comp => (
+                    <button
+                      key={comp}
+                      onClick={() => setSelectedCompanyConfig(comp)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
+                        selectedCompanyConfig === comp
+                          ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                          : 'bg-slate-800/60 text-slate-400 border-slate-700/60 hover:text-white'
+                      }`}
+                    >
+                      {comp}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Number of Questions */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Number of Questions</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[5, 10, 15, 20].map(cnt => (
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {[5, 10, 15, 20, 30, 50].map(cnt => (
                     <button
                       key={cnt}
                       onClick={() => setQuestionCountConfig(cnt)}
                       className={`py-2 rounded-xl text-xs font-bold border transition ${
                         questionCountConfig === cnt
-                          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500'
-                          : 'bg-slate-800/50 text-slate-400 border-slate-700 hover:text-white'
+                          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500 font-extrabold shadow-sm'
+                          : 'bg-slate-800/50 text-slate-400 border-slate-700 hover:text-white hover:border-slate-600'
                       }`}
                     >
                       {cnt} Qs
@@ -829,7 +947,7 @@ export default function AptitudePage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => startQuiz(selectedCategoryConfig, questionCountConfig, difficultyConfig, timerModeConfig)}
+                  onClick={() => startQuiz(selectedCategoryConfig, questionCountConfig, difficultyConfig, timerModeConfig, selectedCompanyConfig, selectedSubtopicConfig)}
                   className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-500/25 transition"
                 >
                   Start Assessment Now
@@ -922,10 +1040,15 @@ export default function AptitudePage() {
               
               {/* Question Header Status */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-xs font-extrabold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-xl">
                     Question {currentQuestionIndex + 1} of {testQuestions.length}
                   </span>
+                  {currentQ.company_tag && (
+                    <span className="text-xs font-bold text-amber-300 bg-amber-500/10 px-3 py-1 rounded-xl border border-amber-500/20 flex items-center gap-1">
+                      🏢 {currentQ.company_tag}
+                    </span>
+                  )}
                   <span className="text-xs font-semibold text-slate-400 bg-slate-800/60 px-3 py-1 rounded-xl border border-slate-800">
                     {currentQ.subtopic || 'General Aptitude'}
                   </span>
@@ -1410,10 +1533,15 @@ export default function AptitudePage() {
                 
                 {/* Question Status Pill & Meta */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2.5 flex-wrap">
                     <span className="text-xs font-extrabold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-xl">
                       Review {currentReviewIndex + 1} of {reviewList.length}
                     </span>
+                    {currentQ.company_tag && (
+                      <span className="text-xs font-bold text-amber-300 bg-amber-500/10 px-3 py-1 rounded-xl border border-amber-500/20 flex items-center gap-1">
+                        🏢 {currentQ.company_tag}
+                      </span>
+                    )}
                     <span className="text-xs text-slate-400 bg-slate-800/60 px-3 py-1 rounded-xl border border-slate-800">
                       {currentQ.subtopic || 'Aptitude'}
                     </span>

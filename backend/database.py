@@ -5,6 +5,8 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(env_path)
 load_dotenv()
 
 DATABASE_URL = os.getenv(
@@ -480,6 +482,7 @@ def init_db():
             category TEXT NOT NULL,
             subtopic TEXT NOT NULL,
             difficulty TEXT NOT NULL,
+            company_tag TEXT,
             question_text TEXT NOT NULL,
             option_a TEXT NOT NULL,
             option_b TEXT NOT NULL,
@@ -489,6 +492,7 @@ def init_db():
             explanation TEXT NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE aptitude_questions ADD COLUMN IF NOT EXISTS company_tag TEXT;
     """)
     
     # 3. Aptitude Test Results table
@@ -507,6 +511,201 @@ def init_db():
             completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
+
+    # 4. User Question Progress (Solved / Unsolved Tracker)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_question_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            question_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            selected_option TEXT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, question_id)
+        );
+    """)
+
+    # 5. DSA Problems Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dsa_problems (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            slug TEXT,
+            difficulty VARCHAR(20) NOT NULL,
+            acceptance_rate REAL DEFAULT 0.0,
+            link TEXT UNIQUE NOT NULL,
+            topics TEXT[] DEFAULT '{}',
+            companies TEXT[] DEFAULT '{}',
+            company_frequencies JSONB DEFAULT '{}'::jsonb,
+            description TEXT,
+            examples JSONB DEFAULT '[]'::jsonb,
+            constraints JSONB DEFAULT '[]'::jsonb,
+            hints JSONB DEFAULT '[]'::jsonb,
+            code_snippets JSONB DEFAULT '{}'::jsonb,
+            solutions JSONB DEFAULT '{}'::jsonb,
+            editorial TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_dsa_problems_difficulty ON dsa_problems(difficulty);
+        CREATE INDEX IF NOT EXISTS idx_dsa_problems_slug ON dsa_problems(slug);
+    """)
+
+    # Safe column additions if dsa_problems table already existed without rich fields
+    dsa_columns = [
+        ("description", "TEXT"),
+        ("examples", "JSONB DEFAULT '[]'::jsonb"),
+        ("constraints", "JSONB DEFAULT '[]'::jsonb"),
+        ("hints", "JSONB DEFAULT '[]'::jsonb"),
+        ("code_snippets", "JSONB DEFAULT '{}'::jsonb"),
+        ("solutions", "JSONB DEFAULT '{}'::jsonb"),
+        ("editorial", "TEXT")
+    ]
+    for col_name, col_type in dsa_columns:
+        try:
+            cursor.execute(f"ALTER TABLE dsa_problems ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+        except Exception:
+            pass
+
+    # 6. User DSA Progress Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_dsa_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            problem_id INTEGER NOT NULL REFERENCES dsa_problems(id) ON DELETE CASCADE,
+            is_solved BOOLEAN DEFAULT FALSE,
+            is_bookmarked BOOLEAN DEFAULT FALSE,
+            solved_at TIMESTAMP WITH TIME ZONE,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, problem_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_dsa_progress_user ON user_dsa_progress(user_id);
+    """)
+
+    # 7. Seed demo/default user if no users exist
+    cursor.execute("SELECT COUNT(*) as count FROM users;")
+    if cursor.fetchone()["count"] == 0:
+        import hashlib
+        salt = "ai_studio_salt_2026"
+        demo_hashed = hashlib.sha256(("password123" + salt).encode('utf-8')).hexdigest()
+        cursor.execute("""
+            INSERT INTO users (email, full_name, hashed_password, plan, credits, preferred_language)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (email) DO NOTHING;
+        """, ("demo@prepnest.com", "Demo User", demo_hashed, "Pro", 250, "Python"))
+
+    # 8. Resume Analyses Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resume_analyses (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER DEFAULT 1 REFERENCES users(id) ON DELETE CASCADE,
+            file_name TEXT NOT NULL,
+            file_size INTEGER,
+            overall_score INTEGER NOT NULL,
+            readiness_level TEXT NOT NULL,
+            scores JSONB NOT NULL,
+            skills_categorized JSONB NOT NULL,
+            structure JSONB NOT NULL,
+            strengths JSONB NOT NULL,
+            issues JSONB NOT NULL,
+            missing_keywords JSONB NOT NULL,
+            matched_keywords JSONB NOT NULL,
+            bullet_improvements JSONB NOT NULL,
+            formatting_checks JSONB NOT NULL,
+            recommendations JSONB NOT NULL,
+            target_company TEXT,
+            target_role TEXT,
+            company_match JSONB,
+            job_match JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_resume_analyses_user ON resume_analyses(user_id);
+    """)
+
+    # 9. Roadmap Tables
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS roadmap_domains (
+            id VARCHAR(50) PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            difficulty VARCHAR(20) NOT NULL,
+            estimated_weeks VARCHAR(30) NOT NULL,
+            display_order INTEGER NOT NULL DEFAULT 1,
+            icon_name VARCHAR(50) NOT NULL DEFAULT 'Code2',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_roadmap_domains_order ON roadmap_domains(display_order);
+
+        CREATE TABLE IF NOT EXISTS roadmap_topics (
+            id SERIAL PRIMARY KEY,
+            domain_id VARCHAR(50) NOT NULL REFERENCES roadmap_domains(id) ON DELETE CASCADE,
+            slug VARCHAR(100) NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            difficulty VARCHAR(20) NOT NULL DEFAULT 'Beginner',
+            estimated_hours INTEGER DEFAULT 4,
+            display_order INTEGER NOT NULL DEFAULT 1,
+            explanation TEXT,
+            key_points JSONB DEFAULT '[]'::jsonb,
+            code_example TEXT,
+            quiz JSONB DEFAULT '{}'::jsonb,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(domain_id, slug)
+        );
+        CREATE INDEX IF NOT EXISTS idx_roadmap_topics_domain ON roadmap_topics(domain_id, display_order);
+
+        CREATE TABLE IF NOT EXISTS roadmap_resources (
+            id SERIAL PRIMARY KEY,
+            topic_id INTEGER NOT NULL REFERENCES roadmap_topics(id) ON DELETE CASCADE,
+            resource_type VARCHAR(30) NOT NULL DEFAULT 'doc',
+            title TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            url TEXT NOT NULL,
+            is_free BOOLEAN DEFAULT TRUE,
+            display_order INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_roadmap_resources_topic ON roadmap_resources(topic_id, display_order);
+
+        CREATE TABLE IF NOT EXISTS roadmap_practice_tasks (
+            id SERIAL PRIMARY KEY,
+            topic_id INTEGER NOT NULL REFERENCES roadmap_topics(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            difficulty VARCHAR(20) NOT NULL DEFAULT 'Easy',
+            hint TEXT,
+            test_cases JSONB DEFAULT '[]'::jsonb,
+            display_order INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_roadmap_practice_tasks_topic ON roadmap_practice_tasks(topic_id, display_order);
+
+        CREATE TABLE IF NOT EXISTS roadmap_projects (
+            id SERIAL PRIMARY KEY,
+            domain_id VARCHAR(50) NOT NULL REFERENCES roadmap_domains(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            difficulty VARCHAR(20) NOT NULL DEFAULT 'Intermediate',
+            estimated_hours INTEGER DEFAULT 10,
+            requirements JSONB DEFAULT '[]'::jsonb,
+            tech_stack TEXT[] DEFAULT '{}',
+            deliverables JSONB DEFAULT '[]'::jsonb,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_roadmap_projects_domain ON roadmap_projects(domain_id);
+
+        CREATE TABLE IF NOT EXISTS user_roadmap_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            topic_id INTEGER NOT NULL REFERENCES roadmap_topics(id) ON DELETE CASCADE,
+            status VARCHAR(20) NOT NULL DEFAULT 'completed',
+            meta JSONB DEFAULT '{}'::jsonb,
+            completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, topic_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_roadmap_progress_user ON user_roadmap_progress(user_id);
+    """)
+
     
     # Check if questions need seeding
     cursor.execute("SELECT COUNT(*) as count FROM aptitude_questions")

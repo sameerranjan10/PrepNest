@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 
 import { AuthProvider } from "./context/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 import LandingPage from "./pages/Landing";
 import LoginPage from "./pages/Login";
@@ -28,90 +29,114 @@ export default function App() {
     <AuthProvider>
       <Router>
         <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<Navigate to="/landing" replace />} />
+          <Route path="/landing" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
 
-          <Route
-            path="/"
-            element={<Navigate to="/landing" replace />}
-          />
-
-          <Route
-            path="/landing"
-            element={<LandingPage />}
-          />
-
-          <Route
-            path="/login"
-            element={<LoginPage />}
-          />
-
-          <Route
-            path="/signup"
-            element={<SignupPage />}
-          />
-
+          {/* Protected Routes (Require Neon Auth Login) */}
           <Route
             path="/dashboard"
-            element={<DashboardPage />}
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/settings"
-            element={<SettingsPage />}
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
           />
-
 
           <Route
             path="/aptitude"
-            element={<AptitudePage />}
+            element={
+              <ProtectedRoute>
+                <AptitudePage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/roadmaps"
-            element={<RoadmapsPage />}
+            element={
+              <ProtectedRoute>
+                <RoadmapsPage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/dsa"
-            element={<DSAPage />}
+            element={
+              <ProtectedRoute>
+                <DSAPage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/ai-assistant"
-            element={<AIAssistantPage />}
+            element={
+              <ProtectedRoute>
+                <AIAssistantPage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/company-prep"
-            element={<CompanyPrepPage />}
+            element={
+              <ProtectedRoute>
+                <CompanyPrepPage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/mock-interview"
-            element={<MockInterviewPage />}
+            element={
+              <ProtectedRoute>
+                <MockInterviewPage />
+              </ProtectedRoute>
+            }
           />
 
           <Route
             path="/resume-analyzer"
-            element={<ResumeAnalyzerPage />}
+            element={
+              <ProtectedRoute>
+                <ResumeAnalyzerPage />
+              </ProtectedRoute>
+            }
           />
 
-          {/* Your Leaderboard */}
           <Route
             path="/leaderboard"
-            element={<LeaderboardPage />}
+            element={
+              <ProtectedRoute>
+                <LeaderboardPage />
+              </ProtectedRoute>
+            }
           />
 
-          {/* Fallback - keep this LAST */}
           <Route
-            path="*"
-            element={<Navigate to="/dashboard" replace />}
+            path="/community"
+            element={
+              <ProtectedRoute>
+                <CommunityPage />
+              </ProtectedRoute>
+            }
           />
-          <Route
-  path="/community"
-  element={<CommunityPage />}
-/>
 
-
+          {/* Fallback to landing */}
+          <Route path="*" element={<Navigate to="/landing" replace />} />
         </Routes>
       </Router>
     </AuthProvider>
