@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
 import {
@@ -14,8 +14,13 @@ import {
   AlertTriangle,
   RotateCcw,
   ChevronRight,
+  ChevronLeft,
   Clock,
   MessageSquare,
+  RefreshCw,
+  Award,
+  AlertCircle,
+  HelpCircle,
 } from "lucide-react";
 
 /* =========================================================
@@ -197,6 +202,57 @@ const INTERVIEW_QUESTIONS = {
 };
 
 /* =========================================================
+   EVALUATION FUNCTION
+========================================================= */
+
+const evaluateAnswer = (answerText, question) => {
+  if (!answerText || !answerText.trim()) {
+    return {
+      score: 0,
+      wordCount: 0,
+      matchedKeywords: [],
+    };
+  }
+
+  const normalizedAnswer = answerText.toLowerCase();
+  const words = normalizedAnswer.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+
+  const matchedKeywords = (question?.keywords || []).filter((keyword) =>
+    normalizedAnswer.includes(keyword.toLowerCase())
+  );
+
+  const keywordScore =
+    question?.keywords?.length > 0
+      ? Math.round((matchedKeywords.length / question.keywords.length) * 50)
+      : 0;
+
+  let lengthScore = 0;
+  if (wordCount >= 100) {
+    lengthScore = 30;
+  } else if (wordCount >= 60) {
+    lengthScore = 25;
+  } else if (wordCount >= 30) {
+    lengthScore = 18;
+  } else if (wordCount >= 15) {
+    lengthScore = 10;
+  } else {
+    lengthScore = 5;
+  }
+
+  const structureScore =
+    answerText.includes(".") || answerText.includes(",") ? 20 : 10;
+
+  const score = Math.min(100, keywordScore + lengthScore + structureScore);
+
+  return {
+    score,
+    wordCount,
+    matchedKeywords,
+  };
+};
+
+/* =========================================================
    MAIN COMPONENT
 ========================================================= */
 
@@ -204,6 +260,14 @@ export default function MockInterviewPage() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const recognitionRef = useRef(null);
+  const isListeningRef = useRef(false);
+  const finalizedIndicesRef = useRef(new Set());
+
+  // Check speech recognition support once
+  const [isSpeechSupported, setIsSpeechSupported] = useState(() => {
+    return typeof window !== "undefined" &&
+      !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  });
 
   const [projectMock, setProjectMock] = useState(() => {
     try {
@@ -233,26 +297,25 @@ export default function MockInterviewPage() {
 
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
 
-  const [currentQuestion, setCurrentQuestion] =
-    useState(0);
-
+  // Current question answer text (manual + finalized speech)
   const [answer, setAnswer] = useState("");
+  // Live unfinalized speech (interim only, cleared on finalize or stop)
+  const [interimTranscript, setInterimTranscript] = useState("");
 
+  // Store answers per question: Array of objects indexed by question index
   const [answers, setAnswers] = useState([]);
 
-  const [isAnswering, setIsAnswering] =
-    useState(false);
-
-  const [cameraActive, setCameraActive] =
-    useState(false);
-
-  const [micActive, setMicActive] =
-    useState(false);
+  const [isAnswering, setIsAnswering] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [micActive, setMicActive] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+  const [micError, setMicError] = useState(null);
 
   const [timeLeft, setTimeLeft] = useState(180);
-
   const [results, setResults] = useState(null);
+  const [xpData, setXpData] = useState(null);
 
   const questions =
     allInterviewQuestions[interviewType] || INTERVIEW_QUESTIONS.Technical;
@@ -262,70 +325,43 @@ export default function MockInterviewPage() {
   ======================================================= */
 
   useEffect(() => {
-    if (
-      !started ||
-      finished ||
-      !isAnswering
-    ) {
+    if (!started || finished) {
       return;
     }
 
     if (timeLeft <= 0) {
-      submitAnswer();
+      handleNext();
       return;
     }
 
     const timer = setInterval(() => {
-      setTimeLeft((previous) => previous - 1);
+      setTimeLeft((prev) => prev - 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [
-    started,
-    finished,
-    isAnswering,
-    timeLeft,
-  ]);
+  }, [started, finished, timeLeft]);
 
   /* =======================================================
-     CAMERA VIDEO ATTACHMENT FIX
+     CAMERA ATTACHMENT
   ======================================================= */
 
   useEffect(() => {
-    if (
-      cameraActive &&
-      videoRef.current &&
-      streamRef.current
-    ) {
-      videoRef.current.srcObject =
-        streamRef.current;
-
-      videoRef.current
-        .play()
-        .catch((error) => {
-          console.log(
-            "Video autoplay error:",
-            error
-          );
-        });
+    if (cameraActive && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch((err) => {
+        console.warn("Video playback error:", err);
+      });
     }
   }, [cameraActive, started]);
 
   /* =======================================================
-     CLEANUP
+     CLEANUP ON UNMOUNT
   ======================================================= */
 
   useEffect(() => {
     return () => {
       stopCamera();
-
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (error) {
-          console.log(error);
-        }
-      }
+      stopSpeechRecognition();
     };
   }, []);
 
@@ -335,231 +371,266 @@ export default function MockInterviewPage() {
 
   const formatTime = (seconds) => {
     const minutes = Math.floor(seconds / 60);
-
-    const remainingSeconds =
-      seconds % 60;
-
-    return `${String(minutes).padStart(
-      2,
-      "0"
-    )}:${String(remainingSeconds).padStart(
-      2,
-      "0"
-    )}`;
+    const remaining = seconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
   };
 
   /* =======================================================
-     START CAMERA + MICROPHONE
+     CAMERA & MICROPHONE HARDWARE
   ======================================================= */
 
   const startCamera = async () => {
+    setCameraError(null);
     try {
-      if (
-        !navigator.mediaDevices?.getUserMedia
-      ) {
-        alert(
-          "Camera and microphone are not supported by this browser."
-        );
-
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError("Camera and microphone are not supported in this browser environment.");
         return;
       }
 
-      const stream =
-        await navigator.mediaDevices.getUserMedia(
-          {
-            video: {
-              facingMode: "user",
-              width: {
-                ideal: 1280,
-              },
-              height: {
-                ideal: 720,
-              },
-            },
-            audio: true,
+      // First attempt video + audio
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: true,
+        });
+
+        streamRef.current = stream;
+        setCameraActive(true);
+        setMicActive(true);
+        setCameraError(null);
+      } catch (videoError) {
+        // Fallback: If no camera hardware is attached or video fails, try audio-only
+        if (
+          videoError.name === "NotFoundError" ||
+          videoError.name === "OverconstrainedError" ||
+          videoError.name === "DevicesNotFoundError"
+        ) {
+          try {
+            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            streamRef.current = audioStream;
+            setCameraActive(false);
+            setMicActive(true);
+            setCameraError("No webcam found. Continuing in audio-only mode.");
+          } catch (audioErr) {
+            throw videoError;
           }
-        );
-
-      streamRef.current = stream;
-
-      setCameraActive(true);
-      setMicActive(true);
+        } else {
+          throw videoError;
+        }
+      }
     } catch (error) {
-      console.error(
-        "Camera error:",
-        error
-      );
+      console.error("Camera/Mic error:", error);
+      setCameraActive(false);
 
-      if (
-        error.name === "NotAllowedError"
-      ) {
-        alert(
-          "Camera/Microphone permission was denied. Please allow camera and microphone access in your browser."
+      if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+        setCameraError(
+          "Camera/Microphone permission was denied. Please allow access in browser permissions or continue using manual typing."
         );
-      } else if (
-        error.name === "NotFoundError"
-      ) {
-        alert(
-          "No camera or microphone was found on this device."
-        );
+      } else if (error.name === "NotFoundError") {
+        setCameraError("No webcam or microphone was detected on this device.");
       } else {
-        alert(
-          `Unable to access camera/microphone: ${error.message}`
-        );
+        setCameraError(`Device access issue: ${error.message || "Unable to open webcam."}`);
       }
     }
   };
 
-  /* =======================================================
-     STOP CAMERA
-  ======================================================= */
-
   const stopCamera = () => {
     if (streamRef.current) {
-      streamRef.current
-        .getTracks()
-        .forEach((track) => track.stop());
-
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
-
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-
     setCameraActive(false);
     setMicActive(false);
   };
 
-  /* =======================================================
-     START SPEECH RECOGNITION
-  ======================================================= */
-
-  const startSpeechRecognition = () => {
-    const SpeechRecognition =
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert(
-        "Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge."
-      );
-
-      return;
-    }
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (error) {
-        console.log(error);
-      }
-    }
-
-    const recognition =
-      new SpeechRecognition();
-
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-
-    recognition.onstart = () => {
-      console.log(
-        "Speech recognition started"
-      );
-
-      setIsAnswering(true);
-    };
-
-    recognition.onresult = (event) => {
-      let transcript = "";
-
-      for (
-        let i = event.resultIndex;
-        i < event.results.length;
-        i++
-      ) {
-        transcript +=
-          event.results[i][0].transcript;
-      }
-
-      if (transcript.trim()) {
-        setAnswer((previous) => {
-          const existing =
-            previous.trim();
-
-          if (!existing) {
-            return transcript.trim();
-          }
-
-          return `${existing} ${transcript.trim()}`;
-        });
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.error(
-        "Speech recognition error:",
-        event.error
-      );
-
-      if (
-        event.error === "not-allowed"
-      ) {
-        alert(
-          "Microphone permission was denied. Please allow microphone access."
-        );
-      }
-
-      if (
-        event.error === "no-speech"
-      ) {
-        console.log(
-          "No speech detected."
-        );
-      }
-    };
-
-    recognition.onend = () => {
-      console.log(
-        "Speech recognition ended"
-      );
-    };
-
-    recognitionRef.current =
-      recognition;
-
-    try {
-      recognition.start();
-    } catch (error) {
-      console.error(
-        "Could not start speech recognition:",
-        error
-      );
+  const toggleCamera = () => {
+    if (cameraActive) {
+      stopCamera();
+    } else {
+      startCamera();
     }
   };
 
   /* =======================================================
-     STOP SPEECH RECOGNITION
+     SPEECH RECOGNITION (BUG-FREE & NO DUPLICATION)
   ======================================================= */
 
-  const stopSpeechRecognition = () => {
+  const stopSpeechRecognition = useCallback(() => {
+    isListeningRef.current = false;
+
     if (recognitionRef.current) {
       try {
+        // Detach event listeners so no trailing events are processed
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
-      } catch (error) {
-        console.log(error);
+      } catch (err) {
+        console.warn("Speech recognition stop error:", err);
       }
-
       recognitionRef.current = null;
     }
 
     setIsAnswering(false);
-  };
+    setInterimTranscript("");
+  }, []);
+
+  const startSpeechRecognition = useCallback(() => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setIsSpeechSupported(false);
+      setMicError(
+        "Speech recognition is not supported in this browser. Please use Chrome or Edge, or type your answer manually."
+      );
+      return;
+    }
+
+    // Cleanly stop any existing instance and reset state
+    stopSpeechRecognition();
+
+    finalizedIndicesRef.current.clear();
+    isListeningRef.current = true;
+    setMicError(null);
+    setInterimTranscript("");
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setIsAnswering(true);
+      };
+
+      recognition.onresult = (event) => {
+        if (!isListeningRef.current) return;
+
+        let newFinalText = "";
+        let currentInterim = "";
+
+        // Iterate through all returned results starting at resultIndex
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const transcriptChunk = result[0]?.transcript || "";
+
+          if (result.isFinal) {
+            // Strictly guard against processing the same finalized index more than once
+            if (!finalizedIndicesRef.current.has(i)) {
+              finalizedIndicesRef.current.add(i);
+              const cleanChunk = transcriptChunk.trim();
+              if (cleanChunk) {
+                newFinalText += (newFinalText ? " " : "") + cleanChunk;
+              }
+            }
+          } else {
+            const cleanChunk = transcriptChunk.trim();
+            if (cleanChunk) {
+              currentInterim += (currentInterim ? " " : "") + cleanChunk;
+            }
+          }
+        }
+
+        // Commit final speech to answer state exactly once
+        if (newFinalText) {
+          setAnswer((prev) => {
+            const prevTrimmed = prev ? prev.trim() : "";
+            return prevTrimmed ? `${prevTrimmed} ${newFinalText}` : newFinalText;
+          });
+        }
+
+        // Display interim speech only as a temporary preview
+        setInterimTranscript(currentInterim);
+      };
+
+      recognition.onerror = (event) => {
+        if (event.error === "no-speech") {
+          // Normal pause in speech, ignore without interrupting user
+          return;
+        }
+
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setMicError(
+            "Microphone permission was denied. Please allow microphone access in your browser or type manually."
+          );
+          stopSpeechRecognition();
+          return;
+        }
+
+        if (event.error === "audio-capture") {
+          setMicError("No microphone hardware detected on this device. You can type manually.");
+          stopSpeechRecognition();
+          return;
+        }
+
+        console.warn("Speech recognition warning:", event.error);
+      };
+
+      recognition.onend = () => {
+        setInterimTranscript("");
+
+        // If user is still actively answering and mic was not explicitly stopped,
+        // resume recognition seamlessly (Chrome auto-stops after silence).
+        if (isListeningRef.current) {
+          try {
+            recognition.start();
+          } catch {
+            isListeningRef.current = false;
+            setIsAnswering(false);
+          }
+        } else {
+          setIsAnswering(false);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (error) {
+      console.error("Could not start speech recognition:", error);
+      isListeningRef.current = false;
+      setIsAnswering(false);
+      setMicError(`Unable to start speech recognition: ${error.message}`);
+    }
+  }, [stopSpeechRecognition]);
 
   /* =======================================================
-     START INTERVIEW
+     ANSWER COMMIT & NAVIGATION
   ======================================================= */
+
+  const commitAnswerForQuestion = useCallback(
+    (questionIdx, text) => {
+      const q = questions[questionIdx];
+      if (!q) return null;
+
+      const evalResult = evaluateAnswer(text, q);
+      const answerRecord = {
+        question: q.question,
+        answer: text,
+        score: evalResult.score,
+        wordCount: evalResult.wordCount,
+        matchedKeywords: evalResult.matchedKeywords,
+      };
+
+      setAnswers((prev) => {
+        const copy = [...prev];
+        copy[questionIdx] = answerRecord;
+        return copy;
+      });
+
+      return answerRecord;
+    },
+    [questions]
+  );
 
   const startInterview = async () => {
     setStarted(true);
@@ -567,248 +638,148 @@ export default function MockInterviewPage() {
     setCurrentQuestion(0);
     setAnswers([]);
     setAnswer("");
+    setInterimTranscript("");
     setResults(null);
+    setXpData(null);
     setTimeLeft(180);
 
     await startCamera();
   };
 
-  /* =======================================================
-     START ANSWERING
-  ======================================================= */
-
   const startAnswering = () => {
-    setTimeLeft(180);
-
     startSpeechRecognition();
   };
-
-  /* =======================================================
-     STOP ANSWERING
-  ======================================================= */
 
   const stopAnswering = () => {
     stopSpeechRecognition();
   };
 
-  /* =======================================================
-     EVALUATE ANSWER
-  ======================================================= */
-
-  const evaluateAnswer = (
-    answerText,
-    question
-  ) => {
-    const normalizedAnswer =
-      answerText.toLowerCase();
-
-    const words =
-      normalizedAnswer
-        .split(/\s+/)
-        .filter(Boolean);
-
-    const wordCount =
-      words.length;
-
-    const matchedKeywords =
-      question.keywords.filter(
-        (keyword) =>
-          normalizedAnswer.includes(
-            keyword.toLowerCase()
-          )
-      );
-
-    const keywordScore =
-      question.keywords.length > 0
-        ? Math.round(
-            (matchedKeywords.length /
-              question.keywords.length) *
-              50
-          )
-        : 0;
-
-    let lengthScore = 0;
-
-    if (wordCount >= 100) {
-      lengthScore = 30;
-    } else if (wordCount >= 60) {
-      lengthScore = 25;
-    } else if (wordCount >= 30) {
-      lengthScore = 18;
-    } else if (wordCount >= 15) {
-      lengthScore = 10;
-    } else {
-      lengthScore = 5;
-    }
-
-    const structureScore =
-      answerText.includes(".") ||
-      answerText.includes(",")
-        ? 20
-        : 10;
-
-    const score = Math.min(
-      100,
-      keywordScore +
-        lengthScore +
-        structureScore
-    );
-
-    return {
-      score,
-      wordCount,
-      matchedKeywords,
-    };
+  const handleRetryCurrentAnswer = () => {
+    stopSpeechRecognition();
+    setAnswer("");
+    setInterimTranscript("");
+    setAnswers((prev) => {
+      const copy = [...prev];
+      copy[currentQuestion] = null;
+      return copy;
+    });
+    setTimeLeft(180);
   };
 
-  /* =======================================================
-     SUBMIT ANSWER
-  ======================================================= */
+  const handleNext = () => {
+    stopSpeechRecognition();
+    commitAnswerForQuestion(currentQuestion, answer);
 
-  const submitAnswer = () => {
-    stopAnswering();
-
-    const question =
-      questions[currentQuestion];
-
-    const evaluation =
-      evaluateAnswer(
-        answer,
-        question
-      );
-
-    const newAnswer = {
-      question:
-        question.question,
-
-      answer,
-
-      score:
-        evaluation.score,
-
-      wordCount:
-        evaluation.wordCount,
-
-      matchedKeywords:
-        evaluation.matchedKeywords,
-    };
-
-    const updatedAnswers = [
-      ...answers,
-      newAnswer,
-    ];
-
-    setAnswers(updatedAnswers);
-
-    if (
-      currentQuestion <
-      questions.length - 1
-    ) {
-      setCurrentQuestion(
-        currentQuestion + 1
-      );
-
-      setAnswer("");
+    if (currentQuestion < questions.length - 1) {
+      const nextIdx = currentQuestion + 1;
+      setCurrentQuestion(nextIdx);
+      setAnswer(answers[nextIdx]?.answer || "");
+      setInterimTranscript("");
       setTimeLeft(180);
     } else {
-      finishInterview(
-        updatedAnswers
-      );
+      finishInterview();
     }
+  };
+
+  const handlePrev = () => {
+    if (currentQuestion <= 0) return;
+
+    stopSpeechRecognition();
+    commitAnswerForQuestion(currentQuestion, answer);
+
+    const prevIdx = currentQuestion - 1;
+    setCurrentQuestion(prevIdx);
+    setAnswer(answers[prevIdx]?.answer || "");
+    setInterimTranscript("");
+    setTimeLeft(180);
+  };
+
+  const handleJumpQuestion = (targetIdx) => {
+    if (targetIdx === currentQuestion || targetIdx < 0 || targetIdx >= questions.length) {
+      return;
+    }
+
+    stopSpeechRecognition();
+    commitAnswerForQuestion(currentQuestion, answer);
+
+    setCurrentQuestion(targetIdx);
+    setAnswer(answers[targetIdx]?.answer || "");
+    setInterimTranscript("");
+    setTimeLeft(180);
   };
 
   /* =======================================================
      FINISH INTERVIEW
   ======================================================= */
 
-  const finishInterview = (
-    completedAnswers
-  ) => {
+  const finishInterview = async () => {
     stopCamera();
     stopSpeechRecognition();
+
+    const currentRecord = commitAnswerForQuestion(currentQuestion, answer);
+
+    // Build complete final results
+    const completedAnswers = questions.map((q, idx) => {
+      if (idx === currentQuestion && currentRecord) return currentRecord;
+      if (answers[idx]) return answers[idx];
+      return {
+        question: q.question,
+        answer: "",
+        score: 0,
+        wordCount: 0,
+        matchedKeywords: [],
+      };
+    });
+
+    const attempted = completedAnswers.filter((item) => item.answer && item.answer.trim().length > 0);
 
     const totalScore =
       completedAnswers.length > 0
         ? Math.round(
-            completedAnswers.reduce(
-              (total, item) =>
-                total + item.score,
-              0
-            ) /
+            completedAnswers.reduce((total, item) => total + item.score, 0) /
               completedAnswers.length
           )
         : 0;
-
-    const strengths = [];
-
-    const improvements = [];
 
     const averageWords =
-      completedAnswers.length > 0
+      attempted.length > 0
         ? Math.round(
-            completedAnswers.reduce(
-              (total, item) =>
-                total +
-                item.wordCount,
-              0
-            ) /
-              completedAnswers.length
+            attempted.reduce((total, item) => total + item.wordCount, 0) /
+              attempted.length
           )
         : 0;
 
+    const keywordMatches = completedAnswers.reduce(
+      (total, item) => total + item.matchedKeywords.length,
+      0
+    );
+
+    const strengths = [];
+    const improvements = [];
+
     if (totalScore >= 75) {
-      strengths.push(
-        "Strong overall interview performance."
-      );
+      strengths.push("Strong overall interview performance and structured responses.");
     }
-
-    if (averageWords >= 50) {
-      strengths.push(
-        "Answers contain reasonable detail."
-      );
+    if (averageWords >= 45) {
+      strengths.push("Answers contain comprehensive technical depth and clear context.");
     } else {
-      improvements.push(
-        "Try to provide more detailed answers."
-      );
+      improvements.push("Try to elaborate further and provide more detailed explanations (target 50+ words).");
     }
 
-    const keywordMatches =
-      completedAnswers.reduce(
-        (total, item) =>
-          total +
-          item.matchedKeywords
-            .length,
-        0
-      );
-
-    if (keywordMatches >= 10) {
-      strengths.push(
-        "Good use of relevant interview terminology."
-      );
+    if (keywordMatches >= 8) {
+      strengths.push("Excellent use of relevant domain and role-specific terminology.");
     } else {
-      improvements.push(
-        "Use more relevant technical or role-specific terminology."
-      );
-    }
-
-    if (totalScore < 60) {
-      improvements.push(
-        "Practice structuring answers before speaking."
-      );
+      improvements.push("Incorporate more industry-standard technical keywords and architectural concepts.");
     }
 
     if (totalScore >= 80) {
-      strengths.push(
-        "Your answers show good confidence and structure."
-      );
+      strengths.push("Demonstrated strong problem-solving articulation and confidence.");
+    } else if (totalScore < 60) {
+      improvements.push("Practice the STAR method (Situation, Task, Action, Result) for clearer structure.");
     }
 
-    if (
-      improvements.length === 0
-    ) {
-      improvements.push(
-        "Continue practicing to make your answers more concise and impactful."
-      );
+    if (improvements.length === 0) {
+      improvements.push("Continue practicing to sharpen answer conciseness and delivery impact.");
     }
 
     setResults({
@@ -816,17 +787,21 @@ export default function MockInterviewPage() {
       strengths,
       improvements,
       averageWords,
+      keywordMatches,
+      attemptedCount: attempted.length,
+      totalQuestions: questions.length,
     });
+    setAnswers(completedAnswers);
 
-    // Award +100 XP centrally via backend API (Module 9 Requirement)
+    // Record interview in backend API and award +100 XP
     try {
-      const token = localStorage.getItem('prepnest_token');
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-      fetch(`${API_BASE}/api/interviews/complete`, {
-        method: 'POST',
+      const token = localStorage.getItem("prepnest_token");
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const res = await fetch(`${API_BASE}/api/interviews/complete`, {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           category: interviewType,
@@ -834,21 +809,22 @@ export default function MockInterviewPage() {
           average_words: averageWords,
           keyword_matches: keywordMatches,
           strengths,
-          improvements
-        })
-      }).catch(err => console.warn('Mock interview XP recording error:', err));
-    } catch (e) {
-      // Ignore background fetch failure
+          improvements,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setXpData(data);
+      }
+    } catch (err) {
+      console.warn("Mock interview XP recording error:", err);
     }
 
     setFinished(true);
     setStarted(false);
     setIsAnswering(false);
   };
-
-  /* =======================================================
-     RESTART INTERVIEW
-  ======================================================= */
 
   const restartInterview = () => {
     stopCamera();
@@ -858,8 +834,12 @@ export default function MockInterviewPage() {
     setFinished(false);
     setCurrentQuestion(0);
     setAnswer("");
+    setInterimTranscript("");
     setAnswers([]);
     setResults(null);
+    setXpData(null);
+    setCameraError(null);
+    setMicError(null);
     setTimeLeft(180);
     setIsAnswering(false);
   };
@@ -878,10 +858,9 @@ export default function MockInterviewPage() {
 
           <main className="p-8 overflow-y-auto">
             <div className="max-w-4xl mx-auto space-y-8">
-
+              {/* HEADER */}
               <div className="text-center">
-
-                <div className="w-20 h-20 mx-auto rounded-full bg-indigo-500/10 flex items-center justify-center">
+                <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                   <CheckCircle2 className="w-10 h-10 text-emerald-400" />
                 </div>
 
@@ -890,14 +869,20 @@ export default function MockInterviewPage() {
                 </h1>
 
                 <p className="text-sm text-slate-400 mt-2">
-                  Here's your performance report.
+                  Here is your structured performance analysis and feedback.
                 </p>
 
+                {xpData && (
+                  <div className="mt-4 inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold px-4 py-2 rounded-full">
+                    <Award className="w-4 h-4 text-indigo-400" />
+                    <span>+{xpData.xp_earned || 100} XP Earned! Daily Streak: {xpData.streak || 1} day(s)</span>
+                  </div>
+                )}
               </div>
 
-              {/* SCORE */}
-
-              <div className="p-8 rounded-2xl bg-slate-900/60 border border-slate-800 text-center">
+              {/* OVERALL SCORE */}
+              <div className="p-8 rounded-2xl bg-slate-900/60 border border-slate-800 text-center relative overflow-hidden">
+                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500" />
 
                 <p className="text-xs uppercase tracking-wider font-bold text-slate-400">
                   Overall Score
@@ -909,161 +894,148 @@ export default function MockInterviewPage() {
 
                 <p className="text-sm text-slate-400 mt-2">
                   {results.score >= 80
-                    ? "Excellent performance"
+                    ? "Excellent performance — placement ready!"
                     : results.score >= 65
-                    ? "Good performance"
+                    ? "Good performance — refine your keywords & structure."
                     : results.score >= 50
-                    ? "Needs improvement"
-                    : "Keep practicing"}
+                    ? "Satisfactory — practice structured technical articulation."
+                    : "Needs improvement — keep practicing with mock questions."}
                 </p>
-
               </div>
 
-              {/* SUMMARY */}
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-
+              {/* STATS SUMMARY */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <StatCard
-                  title="Questions"
-                  value={answers.length}
+                  title="Questions Answered"
+                  value={`${results.attemptedCount} / ${results.totalQuestions}`}
                 />
-
                 <StatCard
                   title="Average Words"
                   value={results.averageWords}
                 />
-
+                <StatCard
+                  title="Keywords Matched"
+                  value={results.keywordMatches}
+                />
                 <StatCard
                   title="Interview Type"
                   value={interviewType}
                 />
-
               </div>
 
-              {/* STRENGTHS / IMPROVEMENTS */}
-
+              {/* STRENGTHS / AREAS TO IMPROVE */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
                 <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
                   <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2 mb-4">
                     <CheckCircle2 className="w-4 h-4" />
                     Strengths
                   </h3>
 
                   <ul className="space-y-3 text-sm text-slate-300">
-
-                    {results.strengths.map(
-                      (strength, index) => (
-                        <li
-                          key={index}
-                          className="flex gap-2"
-                        >
-                          <span className="text-emerald-400">
-                            ✓
-                          </span>
-
-                          {strength}
-                        </li>
-                      )
-                    )}
-
+                    {results.strengths.map((strength, index) => (
+                      <li key={index} className="flex items-start gap-2">
+                        <span className="text-emerald-400 font-bold">✓</span>
+                        <span>{strength}</span>
+                      </li>
+                    ))}
                   </ul>
-
                 </div>
 
                 <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
                   <h3 className="text-sm font-bold text-amber-400 flex items-center gap-2 mb-4">
                     <AlertTriangle className="w-4 h-4" />
                     Areas to Improve
                   </h3>
 
                   <ul className="space-y-3 text-sm text-slate-300">
-
-                    {results.improvements.map(
-                      (item, index) => (
-                        <li
-                          key={index}
-                          className="flex gap-2"
-                        >
-                          <span className="text-amber-400">
-                            !
-                          </span>
-
-                          {item}
-                        </li>
-                      )
-                    )}
-
+                    {results.improvements.map((item, index) => (
+                      <li key={index} className="flex items-start gap-2">
+                        <span className="text-amber-400 font-bold">!</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
                   </ul>
-
                 </div>
-
               </div>
 
-              {/* QUESTION RESULTS */}
-
+              {/* QUESTION-BY-QUESTION ANALYSIS */}
               <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
-                <h3 className="text-sm font-bold text-white mb-5">
+                <h3 className="text-sm font-bold text-white mb-5 flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-indigo-400" />
                   Question-by-Question Analysis
                 </h3>
 
                 <div className="space-y-4">
-
-                  {answers.map(
-                    (item, index) => (
-                      <div
-                        key={index}
-                        className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/50"
-                      >
-
-                        <div className="flex items-start justify-between gap-4">
-
-                          <div>
-
-                            <p className="text-xs text-indigo-400 font-bold">
-                              Question{" "}
-                              {index + 1}
-                            </p>
-
-                            <p className="text-sm font-semibold text-white mt-1">
-                              {item.question}
-                            </p>
-
-                          </div>
-
-                          <span className="text-sm font-bold text-emerald-400">
-                            {item.score}%
-                          </span>
-
+                  {answers.map((item, index) => (
+                    <div
+                      key={index}
+                      className="p-5 rounded-xl bg-slate-800/40 border border-slate-700/50 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs text-indigo-400 font-bold uppercase tracking-wider">
+                            Question {index + 1}
+                          </p>
+                          <p className="text-sm font-semibold text-white mt-1">
+                            {item.question}
+                          </p>
                         </div>
 
-                        <p className="text-xs text-slate-400 mt-3">
-                          {item.answer ||
-                            "No answer provided."}
-                        </p>
-
+                        <span
+                          className={`text-sm font-bold px-3 py-1 rounded-full border ${
+                            item.score >= 70
+                              ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                              : item.score >= 40
+                              ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                              : "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                          }`}
+                        >
+                          {item.score}%
+                        </span>
                       </div>
-                    )
-                  )}
 
+                      <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                        <p className="text-xs text-slate-300 whitespace-pre-wrap">
+                          {item.answer ? (
+                            item.answer
+                          ) : (
+                            <span className="text-slate-500 italic">
+                              No response recorded for this question.
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-1 gap-2">
+                        <span>{item.wordCount || 0} words</span>
+
+                        {item.matchedKeywords && item.matchedKeywords.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-slate-500 text-[11px]">Keywords found:</span>
+                            {item.matchedKeywords.map((kw, kwIdx) => (
+                              <span
+                                key={kwIdx}
+                                className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-medium"
+                              >
+                                {kw}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-
               </div>
 
+              {/* ACTION BUTTON */}
               <button
-                onClick={
-                  restartInterview
-                }
-                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-3 rounded-xl transition"
+                onClick={restartInterview}
+                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-3.5 rounded-xl transition shadow-lg shadow-indigo-600/20"
               >
                 <RotateCcw className="w-4 h-4" />
-
                 Start Another Interview
               </button>
-
             </div>
           </main>
         </div>
@@ -1072,135 +1044,106 @@ export default function MockInterviewPage() {
   }
 
   /* =======================================================
-     MAIN PAGE
+     MAIN PAGE / ACTIVE INTERVIEW ROOM
   ======================================================= */
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100 font-sans">
-
       <Sidebar activeRoute="mock-interview" />
 
       <div className="flex-1 flex flex-col min-w-0">
-
         <Header />
 
         <main className="p-8 space-y-8 overflow-y-auto">
-
-          {/* HEADER */}
-
+          {/* TOP HEADER */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-
             <div>
-
               <h1 className="text-2xl font-extrabold text-white">
                 AI Interactive Mock Interview Room
               </h1>
-
               <p className="text-sm text-slate-400 mt-1">
-                Practice technical, HR and behavioral interviews.
+                Real-time webcam preview, speech-to-text response capture, and structured feedback.
               </p>
-
             </div>
 
             {!started && (
               <button
-                onClick={
-                  startInterview
-                }
+                onClick={startInterview}
                 className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold px-5 py-3 rounded-xl transition shadow-lg shadow-indigo-500/20"
               >
                 <Play className="w-4 h-4 fill-white" />
-
                 Start Interview
               </button>
             )}
-
           </div>
 
-          {/* INTERVIEW TYPE */}
-
+          {/* SETUP SCREEN: CHOOSE INTERVIEW TYPE */}
           {!started && (
-            <div className="max-w-3xl">
-
+            <div className="max-w-4xl space-y-6">
               <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
                 <h2 className="text-base font-bold text-white">
                   Choose Interview Type
                 </h2>
-
                 <p className="text-xs text-slate-400 mt-1">
-                  Select the type of interview you want to practice.
+                  Select the practice track you want to prepare for.
                 </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
-
-                  {Object.keys(
-                    allInterviewQuestions
-                  ).map((type) => (
-
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                  {Object.keys(allInterviewQuestions).map((type) => (
                     <button
                       key={type}
-                      onClick={() =>
-                        setInterviewType(
-                          type
-                        )
-                      }
+                      onClick={() => setInterviewType(type)}
                       className={`p-5 rounded-xl border text-left transition ${
-                        interviewType ===
-                        type
-                          ? "border-indigo-500 bg-indigo-500/10"
-                          : "border-slate-700 bg-slate-800/30 hover:border-slate-600"
+                        interviewType === type
+                          ? "border-indigo-500 bg-indigo-500/10 shadow-lg shadow-indigo-500/10"
+                          : "border-slate-800 bg-slate-900/40 hover:border-slate-700"
                       }`}
                     >
-
                       <Sparkles
                         className={`w-5 h-5 ${
-                          interviewType ===
-                          type
+                          interviewType === type
                             ? "text-indigo-400"
                             : "text-slate-500"
                         }`}
                       />
-
                       <p className="text-sm font-bold text-white mt-3">
-                        {type === 'Project' && projectMock?.projectTitle
-                          ? `Project Defense`
-                          : type}
+                        {type === "Project" && projectMock?.projectTitle
+                          ? "Project Defense"
+                          : `${type} Interview`}
                       </p>
-
                       <p className="text-xs text-slate-400 mt-1">
-                        {type === 'Project' && projectMock?.projectTitle
+                        {type === "Project" && projectMock?.projectTitle
                           ? projectMock.projectTitle
-                          : `${allInterviewQuestions[type]?.length || 5} questions`}
+                          : `${allInterviewQuestions[type]?.length || 5} curated questions`}
                       </p>
-
                     </button>
-
                   ))}
-
                 </div>
-
               </div>
 
+              {/* SYSTEM CAPABILITY / PERMISSIONS NOTICE */}
+              <div className="p-5 rounded-2xl bg-slate-900/40 border border-slate-800 flex items-start gap-3 text-xs text-slate-400">
+                <HelpCircle className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-slate-300">
+                    System Readiness Checklist
+                  </p>
+                  <p>
+                    Ensure your browser has webcam and microphone permissions enabled. Speech recognition works best on Google Chrome or Microsoft Edge. You can also type answers manually at any time.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* INTERVIEW ROOM */}
-
+          {/* ACTIVE INTERVIEW ROOM */}
           {started && (
-
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-              {/* LEFT SIDE */}
-
+              {/* LEFT & CENTER COLUMN */}
               <div className="lg:col-span-2 space-y-6">
-
-                {/* CAMERA */}
-
+                {/* WEBCAM PREVIEW */}
                 <div className="relative aspect-video rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shadow-2xl">
-
                   {cameraActive ? (
-
                     <video
                       ref={videoRef}
                       autoPlay
@@ -1208,461 +1151,411 @@ export default function MockInterviewPage() {
                       playsInline
                       className="w-full h-full object-cover"
                     />
-
                   ) : (
-
-                    <div className="text-center">
-
+                    <div className="text-center p-6">
                       <div className="w-16 h-16 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-indigo-400">
-
                         <User className="w-8 h-8" />
-
                       </div>
-
                       <p className="text-sm font-semibold text-slate-300 mt-3">
                         Camera is off
                       </p>
-
+                      <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                        {cameraError || "You can enable your camera or proceed with voice/text."}
+                      </p>
+                      <button
+                        onClick={toggleCamera}
+                        className="mt-4 inline-flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-semibold px-3.5 py-1.5 rounded-lg border border-slate-700 transition"
+                      >
+                        <Video className="w-3.5 h-3.5" />
+                        Turn Camera On
+                      </button>
                     </div>
-
                   )}
 
-                  {/* AI INTERVIEWER */}
-
+                  {/* AI INTERVIEWER OVERLAY */}
                   <div className="absolute top-4 right-4 bg-slate-900/90 backdrop-blur-md border border-slate-700 p-3 rounded-xl flex items-center gap-3 w-64 shadow-lg">
-
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-xs">
                       AI
                     </div>
-
                     <div>
-
                       <h4 className="text-xs font-bold text-slate-200">
                         AI Senior Interviewer
                       </h4>
-
-                      <p className="text-[10px] text-indigo-400">
-
-                        {isAnswering
-                          ? "Listening to your response..."
-                          : "Waiting for your answer"}
-
+                      <p className="text-[10px] text-indigo-400 flex items-center gap-1">
+                        {isAnswering ? (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                            Listening to your response...
+                          </>
+                        ) : (
+                          "Waiting for your answer"
+                        )}
                       </p>
-
                     </div>
-
                   </div>
 
-                  {/* STATUS */}
-
-                  <div className="absolute bottom-4 left-4 flex gap-2">
-
+                  {/* STATUS CHIPS & CONTROLS OVERLAY */}
+                  <div className="absolute bottom-4 left-4 flex flex-wrap gap-2">
                     <span
                       className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1.5 ${
                         cameraActive
                           ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                          : "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                          : "text-slate-400 bg-slate-900/80 border-slate-700"
                       }`}
                     >
-
                       {cameraActive ? (
                         <Video className="w-3.5 h-3.5" />
                       ) : (
                         <VideoOff className="w-3.5 h-3.5" />
                       )}
-
-                      {cameraActive
-                        ? "Camera Active"
-                        : "Camera Off"}
-
+                      {cameraActive ? "Camera On" : "Camera Off"}
                     </span>
 
                     <span
                       className={`text-xs px-3 py-1.5 rounded-full border flex items-center gap-1.5 ${
-                        micActive
+                        isAnswering
+                          ? "text-rose-400 bg-rose-500/10 border-rose-500/20 animate-pulse"
+                          : micActive
                           ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                          : "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                          : "text-slate-400 bg-slate-900/80 border-slate-700"
                       }`}
                     >
-
-                      {micActive ? (
+                      {isAnswering || micActive ? (
                         <Mic className="w-3.5 h-3.5" />
                       ) : (
                         <MicOff className="w-3.5 h-3.5" />
                       )}
-
-                      {micActive
-                        ? "Mic Active"
+                      {isAnswering
+                        ? "Transcribing Voice..."
+                        : micActive
+                        ? "Mic Ready"
                         : "Mic Off"}
-
                     </span>
-
                   </div>
 
-                </div>
-
-                {/* QUESTION PANEL */}
-
-                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-5">
-
-                  <div className="flex items-center justify-between">
-
-                    <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
-
-                      Question{" "}
-                      {currentQuestion +
-                        1}{" "}
-                      of{" "}
-                      {questions.length}
-
-                    </span>
-
-                    <span
-                      className={`text-xs font-mono flex items-center gap-1 ${
-                        timeLeft <= 30
-                          ? "text-rose-400"
-                          : "text-slate-400"
-                      }`}
-                    >
-
-                      <Clock className="w-3.5 h-3.5" />
-
-                      {formatTime(
-                        timeLeft
-                      )}
-
-                    </span>
-
-                  </div>
-
-                  <h3 className="text-lg font-bold text-white leading-relaxed">
-
-                    {questions[
-                      currentQuestion
-                    ].question}
-
-                  </h3>
-
-                  {/* ANSWER BOX */}
-
-                  <div>
-
-                    <textarea
-                      value={answer}
-                      onChange={(e) =>
-                        setAnswer(
-                          e.target.value
-                        )
-                      }
-                      placeholder={
-                        isAnswering
-                          ? "Speak your answer. It will appear here automatically..."
-                          : "You can type your answer here..."
-                      }
-                      className="w-full h-32 resize-none rounded-xl bg-slate-950 border border-slate-700 text-sm text-slate-200 p-4 outline-none focus:border-indigo-500"
-                    />
-
-                    <div className="text-[11px] text-slate-500 mt-2">
-                      {
-                        answer
-                          .split(
-                            /\s+/
-                          )
-                          .filter(
-                            Boolean
-                          ).length
-                      }{" "}
-                      words
+                  {/* CAMERA TOGGLE BUTTON */}
+                  {cameraActive && (
+                    <div className="absolute bottom-4 right-4">
+                      <button
+                        onClick={toggleCamera}
+                        className="bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 transition"
+                      >
+                        <VideoOff className="w-3.5 h-3.5" />
+                        Turn Off Camera
+                      </button>
                     </div>
-
-                  </div>
-
-                  {/* BUTTONS */}
-
-                  <div className="flex flex-wrap items-center gap-3">
-
-                    {!isAnswering ? (
-
-                      <button
-                        onClick={
-                          startAnswering
-                        }
-                        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition"
-                      >
-
-                        <Mic className="w-4 h-4" />
-
-                        Start Answering
-
-                      </button>
-
-                    ) : (
-
-                      <button
-                        onClick={
-                          stopAnswering
-                        }
-                        className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition"
-                      >
-
-                        <MicOff className="w-4 h-4" />
-
-                        Stop Answering
-
-                      </button>
-
-                    )}
-
-                    <button
-                      onClick={
-                        submitAnswer
-                      }
-                      disabled={
-                        !answer.trim()
-                      }
-                      className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition"
-                    >
-
-                      {currentQuestion ===
-                      questions.length -
-                        1 ? (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-
-                          Finish Interview
-                        </>
-                      ) : (
-                        <>
-                          Next Question
-
-                          <ChevronRight className="w-4 h-4" />
-                        </>
-                      )}
-
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        stopCamera();
-                        stopAnswering();
-                        setStarted(false);
-                      }}
-                      className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-4 py-2.5 rounded-lg transition"
-                    >
-
-                      <Square className="w-4 h-4" />
-
-                      End Session
-
-                    </button>
-
-                  </div>
-
+                  )}
                 </div>
 
-              </div>
+                {/* HARDWARE / PERMISSION ERROR BANNER */}
+                {(cameraError || micError) && (
+                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      {cameraError && <p>{cameraError}</p>}
+                      {micError && <p>{micError}</p>}
+                    </div>
+                  </div>
+                )}
 
-              {/* RIGHT SIDE */}
-
-              <div className="space-y-6">
-
-                {/* ANALYTICS */}
-
-                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
-
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-
-                    Interview Analytics
-
-                  </h3>
-
-                  {/* PERFORMANCE */}
-
-                  <div>
-
-                    <div className="flex justify-between text-xs font-semibold mb-2">
-
-                      <span className="text-slate-400">
-                        Current Performance
+                {/* QUESTION & ANSWERING PANEL */}
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-5">
+                  {/* QUESTION HEADER & NAVIGATION PILLS */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                        Question {currentQuestion + 1} of {questions.length}
                       </span>
 
-                      <span className="text-indigo-400">
+                      {/* Question progress pills */}
+                      <div className="flex items-center gap-1.5 ml-2">
+                        {questions.map((_, qIdx) => {
+                          const isCurrent = qIdx === currentQuestion;
+                          const hasAnswer =
+                            (qIdx === currentQuestion && answer.trim().length > 0) ||
+                            (answers[qIdx] && answers[qIdx].answer?.trim().length > 0);
 
-                        {answers.length > 0
+                          return (
+                            <button
+                              key={qIdx}
+                              onClick={() => handleJumpQuestion(qIdx)}
+                              title={`Go to Question ${qIdx + 1}`}
+                              className={`w-6 h-6 rounded-md text-[11px] font-bold transition flex items-center justify-center ${
+                                isCurrent
+                                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                                  : hasAnswer
+                                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                  : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                              }`}
+                            >
+                              {qIdx + 1}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <span
+                      className={`text-xs font-mono flex items-center gap-1.5 ${
+                        timeLeft <= 30 ? "text-rose-400 font-bold animate-pulse" : "text-slate-400"
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      {formatTime(timeLeft)}
+                    </span>
+                  </div>
+
+                  {/* QUESTION TEXT */}
+                  <h3 className="text-lg font-bold text-white leading-relaxed">
+                    {questions[currentQuestion]?.question}
+                  </h3>
+
+                  {/* ANSWER TEXTAREA */}
+                  <div className="space-y-2">
+                    <textarea
+                      value={answer}
+                      onChange={(e) => setAnswer(e.target.value)}
+                      placeholder={
+                        isAnswering
+                          ? "Listening to your voice... Speak clearly into your microphone."
+                          : "Type your answer here, or click 'Start Answering' to speak..."
+                      }
+                      className="w-full h-36 resize-none rounded-xl bg-slate-950 border border-slate-700 text-sm text-slate-200 p-4 outline-none focus:border-indigo-500 leading-relaxed transition"
+                    />
+
+                    {/* LIVE INTERIM TRANSCRIPT BADGE (TEMPORARY PREVIEW ONLY, NOT DUPLICATED) */}
+                    {interimTranscript && (
+                      <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 flex items-start gap-2 animate-pulse">
+                        <Mic className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-semibold text-indigo-200">Listening: </span>
+                          <span className="italic">"{interimTranscript}"</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500">
+                      <span>
+                        {answer.split(/\s+/).filter(Boolean).length} words
+                      </span>
+                      <span>
+                        {answer.length} characters
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ACTION CONTROLS */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    {/* LEFT CONTROLS: MIC & RETRY */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!isAnswering ? (
+                        <button
+                          onClick={startAnswering}
+                          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition shadow-md shadow-indigo-600/20"
+                        >
+                          <Mic className="w-4 h-4" />
+                          Start Answering
+                        </button>
+                      ) : (
+                        <button
+                          onClick={stopAnswering}
+                          className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition shadow-md shadow-rose-600/20"
+                        >
+                          <MicOff className="w-4 h-4" />
+                          Stop Answering
+                        </button>
+                      )}
+
+                      <button
+                        onClick={handleRetryCurrentAnswer}
+                        disabled={!answer && !interimTranscript}
+                        title="Clear current answer and try again"
+                        className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-slate-300 text-xs font-semibold px-3 py-2.5 rounded-lg border border-slate-700 transition"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Retry
+                      </button>
+                    </div>
+
+                    {/* RIGHT CONTROLS: PREVIOUS, NEXT, END */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={handlePrev}
+                        disabled={currentQuestion === 0}
+                        className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-slate-300 text-xs font-semibold px-3.5 py-2.5 rounded-lg border border-slate-700 transition"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Previous
+                      </button>
+
+                      <button
+                        onClick={handleNext}
+                        className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition shadow-md shadow-emerald-600/20"
+                      >
+                        {currentQuestion === questions.length - 1 ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            Finish Interview
+                          </>
+                        ) : (
+                          <>
+                            Next Question
+                            <ChevronRight className="w-4 h-4" />
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (window.confirm("Are you sure you want to end this interview session? Your progress will be saved.")) {
+                            finishInterview();
+                          }
+                        }}
+                        className="flex items-center gap-1.5 bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 text-xs font-semibold px-3 py-2.5 rounded-lg border border-slate-700/80 transition"
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                        End Session
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT SIDEBAR: ANALYTICS & STATUS */}
+              <div className="space-y-6">
+                {/* ANALYTICS CARD */}
+                <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    Interview Analytics
+                  </h3>
+
+                  {/* PERFORMANCE SCORE */}
+                  <div>
+                    <div className="flex justify-between text-xs font-semibold mb-2">
+                      <span className="text-slate-400">Current Performance</span>
+                      <span className="text-indigo-400">
+                        {answers.filter(Boolean).length > 0
                           ? Math.round(
-                              answers.reduce(
-                                (
-                                  total,
-                                  item
-                                ) =>
-                                  total +
-                                  item.score,
-                                0
-                              ) /
-                                answers.length
+                              answers.filter(Boolean).reduce((total, item) => total + item.score, 0) /
+                                answers.filter(Boolean).length
                             )
                           : 0}
                         %
-
                       </span>
-
                     </div>
 
-                    <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden">
-
+                    <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
                       <div
-                        className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full transition-all"
+                        className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full transition-all duration-300"
                         style={{
                           width: `${
-                            answers.length >
-                            0
+                            answers.filter(Boolean).length > 0
                               ? Math.round(
-                                  answers.reduce(
-                                    (
-                                      total,
-                                      item
-                                    ) =>
-                                      total +
-                                      item.score,
-                                    0
-                                  ) /
-                                    answers.length
+                                  answers.filter(Boolean).reduce((total, item) => total + item.score, 0) /
+                                    answers.filter(Boolean).length
                                 )
                               : 0
                           }%`,
                         }}
                       />
-
                     </div>
-
                   </div>
 
                   {/* PROGRESS */}
-
                   <div>
-
                     <div className="flex justify-between text-xs font-semibold mb-2">
-
-                      <span className="text-slate-400">
-                        Interview Progress
-                      </span>
-
+                      <span className="text-slate-400">Interview Progress</span>
                       <span className="text-emerald-400">
-
                         {Math.round(
-                          (answers.length /
-                            questions.length) *
-                            100
+                          ((currentQuestion + (answer.trim() ? 1 : 0)) / questions.length) * 100
                         )}
                         %
-
                       </span>
-
                     </div>
 
-                    <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden">
-
+                    <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
                       <div
-                        className="bg-emerald-500 h-full rounded-full transition-all"
+                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
                         style={{
-                          width: `${
-                            (answers.length /
-                              questions.length) *
-                            100
-                          }%`,
+                          width: `${Math.min(
+                            100,
+                            Math.round(
+                              ((currentQuestion + (answer.trim() ? 1 : 0)) / questions.length) * 100
+                            )
+                          )}%`,
                         }}
                       />
-
                     </div>
-
                   </div>
 
                   {/* TYPE */}
+                  <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] uppercase font-bold text-slate-500">
+                        Interview Track
+                      </p>
+                      <p className="text-sm font-bold text-white mt-0.5">
+                        {interviewType}
+                      </p>
+                    </div>
 
-                  <div className="pt-4 border-t border-slate-800">
-
-                    <p className="text-[10px] uppercase font-bold text-slate-500">
-                      Interview Type
-                    </p>
-
-                    <p className="text-sm font-bold text-white mt-1">
-                      {interviewType}
-                    </p>
-
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-semibold">
+                      {questions.length} Questions
+                    </span>
                   </div>
-
                 </div>
 
-                {/* ANSWER STATUS */}
-
+                {/* ANSWER STATUS CARD */}
                 <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
-
                     <MessageSquare className="w-4 h-4 text-indigo-400" />
-
-                    Answer Status
-
+                    Response Status
                   </h3>
 
-                  <div className="mt-4 space-y-3">
-
+                  <div className="mt-4 space-y-3.5">
                     <div className="flex justify-between text-xs">
-
-                      <span className="text-slate-400">
-                        Answer length
-                      </span>
-
+                      <span className="text-slate-400">Word Count</span>
                       <span className="text-white font-semibold">
-
-                        {
-                          answer
-                            .split(
-                              /\s+/
-                            )
-                            .filter(
-                              Boolean
-                            ).length
-                        }{" "}
-                        words
-
+                        {answer.split(/\s+/).filter(Boolean).length} words
                       </span>
-
                     </div>
 
                     <div className="flex justify-between text-xs">
-
-                      <span className="text-slate-400">
-                        Recording
-                      </span>
-
+                      <span className="text-slate-400">Voice Transcription</span>
                       <span
                         className={
                           isAnswering
-                            ? "text-rose-400"
+                            ? "text-rose-400 font-semibold flex items-center gap-1.5"
                             : "text-slate-500"
                         }
                       >
-
-                        {isAnswering
-                          ? "Listening..."
-                          : "Not recording"}
-
+                        {isAnswering ? (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                            Listening live
+                          </>
+                        ) : (
+                          "Idle"
+                        )}
                       </span>
-
                     </div>
 
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400">Speech API Support</span>
+                      <span
+                        className={
+                          isSpeechSupported ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"
+                        }
+                      >
+                        {isSpeechSupported ? "Supported" : "Manual Typing"}
+                      </span>
+                    </div>
                   </div>
-
                 </div>
-
               </div>
-
             </div>
           )}
-
         </main>
       </div>
     </div>
@@ -1673,21 +1566,11 @@ export default function MockInterviewPage() {
    STAT CARD
 ========================================================= */
 
-function StatCard({
-  title,
-  value,
-}) {
+function StatCard({ title, value }) {
   return (
     <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800">
-
-      <p className="text-xs uppercase font-bold text-slate-500">
-        {title}
-      </p>
-
-      <p className="text-2xl font-extrabold text-white mt-2">
-        {value}
-      </p>
-
+      <p className="text-xs uppercase font-bold text-slate-500">{title}</p>
+      <p className="text-2xl font-extrabold text-white mt-2">{value}</p>
     </div>
   );
 }
