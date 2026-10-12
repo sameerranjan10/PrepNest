@@ -20,6 +20,7 @@ import MockInterviewPage from "./pages/MockInterview";
 import ResumeAnalyzerPage from "./pages/ResumeAnalyzer";
 import AptitudePage from "./pages/Aptitude";
 import RoadmapsPage from "./pages/Roadmaps";
+import ProjectsPage from "./pages/Projects";
 import LeaderboardPage from "./pages/Leaderboard";
 import SettingsPage from "./pages/Settings";
 import CommunityPage from "./pages/Community";
@@ -68,6 +69,15 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <RoadmapsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/projects"
+            element={
+              <ProtectedRoute>
+                <ProjectsPage />
               </ProtectedRoute>
             }
           />

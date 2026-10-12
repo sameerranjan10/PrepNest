@@ -6,13 +6,11 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-load_dotenv(env_path)
-load_dotenv()
+load_dotenv(env_path, override=True)
+load_dotenv(override=True)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_EXjAufhWdP48@ep-royal-brook-axod04dl-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -751,6 +749,21 @@ def init_db():
                 q["explanation"]
             ))
             
+    # 10. Gamification Tables (Module 9 Requirement)
+    try:
+        from gamification import init_gamification_tables, seed_campus_cohort_if_needed
+        init_gamification_tables(cursor)
+        seed_campus_cohort_if_needed(cursor)
+    except Exception as e:
+        print(f"[WARN] Gamification table initialization error: {e}")
+
+    # 11. Projects Feature Tables
+    try:
+        from projects_service import init_projects_tables
+        init_projects_tables(cursor)
+    except Exception as e:
+        print(f"[WARN] Projects table initialization error: {e}")
+
     conn.commit()
     cursor.close()
     conn.close()

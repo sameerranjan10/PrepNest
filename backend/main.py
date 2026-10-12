@@ -18,6 +18,14 @@ from auth import (
 )
 
 from database import get_db_connection, init_db
+from gamification import (
+    award_xp,
+    get_leaderboard_data,
+    calculate_level,
+    calculate_streak,
+    get_user_readiness,
+    XP_RULES,
+)
 from resume_service import (
     full_resume_analysis,
     get_available_companies_and_roles,
@@ -197,22 +205,37 @@ def health_check():
 # -------------------------------------------------------------
 
 @app.post("/api/auth/register", response_model=TokenResponse)
-def register_user(user_data: UserRegister):
+def register_user(user_data: UserRegister, origin: Optional[str] = Header(None)):
     conn = get_db_connection()
     cursor = conn.cursor()
 
     email = user_data.email.lower().strip()
     full_name = user_data.full_name.strip()
+    req_origin = origin or "http://localhost:5173"
 
     # 1. Register with Neon Auth
-    neon_success, neon_data, neon_err = neon_auth_sign_up(full_name, email, user_data.password)
+    neon_success, neon_data, neon_err = neon_auth_sign_up(full_name, email, user_data.password, origin=req_origin)
     if not neon_success:
-        cursor.close()
-        conn.close()
-        raise HTTPException(
-            status_code=400,
-            detail=neon_err or "Registration failed on Neon Auth"
-        )
+        # If user already exists in Neon Auth, attempt sign in or report clean message
+        if neon_err and ("already exists" in neon_err.lower() or "user_already_exists" in neon_err.lower()):
+            succ, sdata, serr = neon_auth_sign_in(email, user_data.password, origin=req_origin)
+            if succ and sdata:
+                neon_success = True
+                neon_data = sdata
+            else:
+                cursor.close()
+                conn.close()
+                raise HTTPException(
+                    status_code=400,
+                    detail="An account with this email already exists. Please log in instead."
+                )
+        else:
+            cursor.close()
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail=neon_err or "Registration failed on Neon Auth"
+            )
 
     neon_token = neon_data.get("token") if neon_data else None
 
@@ -258,8 +281,9 @@ def register_user(user_data: UserRegister):
 # -------------------------------------------------------------
 
 @app.post("/api/auth/login", response_model=TokenResponse)
-def login_user(user_data: UserLogin):
+def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
     email = user_data.email.lower().strip()
+    req_origin = origin or "http://localhost:5173"
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -267,7 +291,7 @@ def login_user(user_data: UserLogin):
     neon_user = None
 
     # 1. Attempt authentication with Neon Auth
-    neon_success, neon_data, neon_err = neon_auth_sign_in(email, user_data.password)
+    neon_success, neon_data, neon_err = neon_auth_sign_in(email, user_data.password, origin=req_origin)
     if neon_success and neon_data:
         neon_token = neon_data.get("token")
         neon_user = neon_data.get("user")
@@ -277,10 +301,11 @@ def login_user(user_data: UserLogin):
         legacy_row = cursor.fetchone()
         if legacy_row and verify_password(user_data.password, legacy_row.get("hashed_password", "")):
             full_name = legacy_row.get("full_name") or "PrepNest Student"
-            neon_auth_sign_up(full_name, email, user_data.password)
-            succ, sdata, _ = neon_auth_sign_in(email, user_data.password)
+            neon_auth_sign_up(full_name, email, user_data.password, origin=req_origin)
+            succ, sdata, _ = neon_auth_sign_in(email, user_data.password, origin=req_origin)
             if succ and sdata:
                 neon_token = sdata.get("token")
+                neon_user = sdata.get("user")
         else:
             cursor.close()
             conn.close()
@@ -953,6 +978,15 @@ def submit_aptitude_test(
                     (user_id, res_item["id"], q_status, res_item.get("selected_option"))
                 )
 
+        # Award central XP (Module 9 Requirement: Aptitude Quiz +30 XP)
+        xp_res = award_xp(
+            user_id=user_id,
+            activity_type="aptitude_completed",
+            reference_id=f"apt_test_{result_id}",
+            cursor=cursor
+        )
+        xp_earned = xp_res.get("xp_earned", 30)
+
         conn.commit()
 
     except Exception:
@@ -962,13 +996,6 @@ def submit_aptitude_test(
     finally:
         cursor.close()
         conn.close()
-
-    # XP calculation
-    xp_earned = (
-        correct_count * 25
-    ) + (
-        10 if score_percentage >= 80 else 0
-    )
 
     return {
         "result_id": result_id,
@@ -1470,6 +1497,17 @@ def solve_single_question(payload: SingleSolveRequest):
             """,
             (payload.user_id or 1, payload.question_id, status, selected)
         )
+
+        xp_earned = 0
+        if is_correct:
+            xp_res = award_xp(
+                user_id=payload.user_id or 1,
+                activity_type="aptitude_completed",
+                reference_id=f"apt_q_{payload.question_id}",
+                cursor=cursor
+            )
+            xp_earned = xp_res.get("xp_earned", 30)
+
         conn.commit()
     finally:
         cursor.close()
@@ -1481,7 +1519,7 @@ def solve_single_question(payload: SingleSolveRequest):
         "correct_option": correct,
         "is_correct": is_correct,
         "status": status,
-        "xp_earned": 25 if is_correct else 0,
+        "xp_earned": xp_earned,
         "explanation": q["explanation"]
     }
 
@@ -1713,16 +1751,25 @@ def toggle_dsa_solved(payload: DSAToggleSolvedRequest):
             (payload.user_id or 1, payload.problem_id)
         )
         row = cursor.fetchone()
+        is_solved = row["is_solved"]
+        xp_earned = 0
+        if is_solved:
+            xp_res = award_xp(
+                user_id=payload.user_id or 1,
+                activity_type="dsa_solved",
+                reference_id=f"dsa_{payload.problem_id}",
+                cursor=cursor
+            )
+            xp_earned = xp_res.get("xp_earned", 50)
         conn.commit()
     finally:
         cursor.close()
         conn.close()
 
-    is_solved = row["is_solved"]
     return {
         "problem_id": payload.problem_id,
         "is_solved": is_solved,
-        "xp_earned": 25 if is_solved else 0
+        "xp_earned": xp_earned
     }
 
 
@@ -1938,6 +1985,15 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
             """,
             (payload.user_id or 1, payload.problem_id)
         )
+
+        xp_res = award_xp(
+            user_id=payload.user_id or 1,
+            activity_type="coding_solved",
+            reference_id=f"code_{payload.problem_id}",
+            cursor=cursor
+        )
+        xp_earned = xp_res.get("xp_earned", 60)
+
         conn.commit()
     finally:
         cursor.close()
@@ -1946,8 +2002,8 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
     return {
         "problem_id": payload.problem_id,
         "status": "Accepted",
-        "xp_earned": 25,
-        "message": "All test cases passed! +25 XP awarded."
+        "xp_earned": xp_earned,
+        "message": f"All test cases passed! +{xp_earned} XP awarded."
     }
 
 
@@ -2729,6 +2785,8 @@ def get_roadmap_recommendations(
         conn.close()
 
 
+
+
 # -------------------------------------------------------------
 # AI Mentor Module Endpoints
 # -------------------------------------------------------------
@@ -3086,9 +3144,637 @@ def mentor_chat_endpoint(
 
 
 
+# =============================================================
+# GAMIFICATION & LEADERBOARD ENDPOINTS (Module 9 Requirement)
+# =============================================================
+
+class MockInterviewCompleteRequest(BaseModel):
+    user_id: Optional[int] = None
+    category: str = "Technical"
+    score: int
+    average_words: Optional[int] = 0
+    keyword_matches: Optional[int] = 0
+    strengths: Optional[List[str]] = []
+    improvements: Optional[List[str]] = []
+
+
+@app.post("/api/interviews/complete")
+def record_mock_interview(
+    payload: MockInterviewCompleteRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Records an AI mock interview completion and awards +100 XP centrally.
+    Updates daily learning activity and continuous streak.
+    """
+    uid = resolve_roadmap_user_id(authorization, payload.user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO mock_interview_results 
+            (user_id, category, score, average_words, keyword_matches, strengths, improvements, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            RETURNING id;
+        """, (
+            uid,
+            payload.category,
+            payload.score,
+            payload.average_words or 0,
+            payload.keyword_matches or 0,
+            json.dumps(payload.strengths or []),
+            json.dumps(payload.improvements or [])
+        ))
+        res_row = cursor.fetchone()
+        interview_id = res_row["id"]
+
+        xp_res = award_xp(
+            user_id=uid,
+            activity_type="mock_interview_completed",
+            reference_id=f"mock_{interview_id}",
+            cursor=cursor
+        )
+        conn.commit()
+        return {
+            "status": "success",
+            "interview_id": interview_id,
+            "xp_earned": xp_res.get("xp_earned", 100),
+            "total_xp": xp_res.get("total_xp", 100),
+            "streak": xp_res.get("streak", 1),
+            "message": "Mock interview completed! +100 XP awarded."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/leaderboard")
+def get_leaderboard(
+    period: str = "overall",
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Single source of truth leaderboard endpoint.
+    Returns:
+      - Current user card (Rank, Level, XP, Problems, Streak, Readiness)
+      - Top 3 performers for selected period
+      - Complete rankings list sorted deterministically
+      - XP rules and period metadata
+    Supported periods: 'weekly', 'monthly', 'overall'
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        data = get_leaderboard_data(period=period, current_user_id=uid, cursor=cursor)
+        return data
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/leaderboard/me")
+def get_my_leaderboard(
+    period: str = "overall",
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns current user leaderboard summary for the requested period.
+    """
+    uid = resolve_roadmap_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        data = get_leaderboard_data(period=period, current_user_id=uid, cursor=cursor)
+        return {
+            "period": period,
+            "user": data.get("current_user"),
+            "highest_xp": data.get("highest_xp")
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+class DevXpRequest(BaseModel):
+    user_id: Optional[int] = None
+    amount: Optional[int] = 50
+
+
+@app.post("/api/leaderboard/dev-xp")
+def earn_dev_xp(
+    payload: Optional[DevXpRequest] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Development & Testing endpoint: Awards demo XP safely to test real-time leaderboard rank changes.
+    Uses 'dev_test' activity_type to isolate from production activities.
+    """
+    req_uid = payload.user_id if payload else None
+    uid = resolve_roadmap_user_id(authorization, req_uid)
+    amount = payload.amount if (payload and payload.amount) else 50
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        import time
+        ref_id = f"dev_test_{uid}_{int(time.time() * 1000)}"
+        xp_res = award_xp(
+            user_id=uid,
+            activity_type="dev_test",
+            reference_id=ref_id,
+            custom_amount=amount,
+            cursor=cursor
+        )
+        conn.commit()
+        return {
+            "status": "success",
+            "xp_awarded": xp_res.get("xp_earned", amount),
+            "total_xp": xp_res.get("total_xp", amount),
+            "streak": xp_res.get("streak", 1),
+            "message": f"+{amount} Demo XP awarded for development testing."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/leaderboard/dev-reset")
+def reset_dev_xp(
+    payload: Optional[DevXpRequest] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Development & Testing endpoint: Safely clears ONLY 'dev_test' activity transactions.
+    Real DSA, coding, aptitude, and interview XP are never deleted.
+    """
+    req_uid = payload.user_id if payload else None
+    uid = resolve_roadmap_user_id(authorization, req_uid)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM xp_transactions WHERE user_id = %s AND activity_type = 'dev_test';",
+            (uid,)
+        )
+        cursor.execute("""
+            UPDATE users 
+            SET total_xp = (SELECT COALESCE(SUM(amount), 0) FROM xp_transactions WHERE user_id = %s)
+            WHERE id = %s
+            RETURNING total_xp;
+        """, (uid, uid))
+        updated = cursor.fetchone()
+        conn.commit()
+        return {
+            "status": "success",
+            "total_xp": updated["total_xp"] if updated else 0,
+            "message": "Demo XP reset completed safely without affecting real progress."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# =============================================================
+# PROJECTS FEATURE ENDPOINTS (Module Enhancement)
+# =============================================================
+
+from projects_service import (
+    CURATED_PROJECT_IDEAS,
+    get_user_projects,
+    get_project_stats,
+    get_project_detail,
+    create_project as service_create_project,
+    update_project as service_update_project,
+    delete_project as service_delete_project,
+    toggle_feature_project,
+    add_project_milestone,
+    update_project_milestone,
+    delete_project_milestone,
+    fetch_github_repo_metadata,
+    generate_project_interview_prep,
+    generate_project_resume_bullets,
+    seed_default_projects_if_needed,
+)
+
+class ProjectCreateRequest(BaseModel):
+    title: str
+    short_description: Optional[str] = ""
+    detailed_description: Optional[str] = ""
+    project_type: Optional[str] = "Personal"
+    project_status: Optional[str] = "In Progress"
+    start_date: Optional[str] = ""
+    end_date: Optional[str] = ""
+    tech_stack: Optional[List[str]] = []
+    key_features: Optional[List[str]] = []
+    user_role: Optional[str] = "Developer"
+    team_size: Optional[int] = 1
+    my_contribution: Optional[str] = ""
+    github_url: Optional[str] = ""
+    live_demo_url: Optional[str] = ""
+    documentation_url: Optional[str] = ""
+    demo_video_url: Optional[str] = ""
+    is_featured: Optional[bool] = False
+    milestones: Optional[List[dict]] = []
+
+
+class ProjectUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    short_description: Optional[str] = None
+    detailed_description: Optional[str] = None
+    project_type: Optional[str] = None
+    project_status: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    tech_stack: Optional[List[str]] = None
+    key_features: Optional[List[str]] = None
+    user_role: Optional[str] = None
+    team_size: Optional[int] = None
+    my_contribution: Optional[str] = None
+    github_url: Optional[str] = None
+    live_demo_url: Optional[str] = None
+    documentation_url: Optional[str] = None
+    demo_video_url: Optional[str] = None
+    is_featured: Optional[bool] = None
+
+
+class MilestoneCreateRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    due_date: Optional[str] = ""
+    is_completed: Optional[bool] = False
+
+
+class MilestoneUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+    is_completed: Optional[bool] = None
+
+
+@app.get("/api/projects")
+def list_projects(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns all projects for the authenticated student.
+    Seeds starter placement projects if the student has 0 projects.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        seed_default_projects_if_needed(uid, cursor)
+        conn.commit()
+        projects = get_user_projects(uid, cursor)
+        stats = get_project_stats(uid, cursor)
+        return {
+            "status": "success",
+            "projects": projects,
+            "stats": stats
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/projects/stats")
+def project_stats(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns Project Overview statistics (Total, Completed, In Progress, Featured, Avg Readiness).
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        stats = get_project_stats(uid, cursor)
+        return {"status": "success", "stats": stats}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/projects/ideas")
+def list_project_ideas(
+    domain: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    technology: Optional[str] = None
+):
+    """
+    Returns curated placement project ideas filterable by domain, difficulty, and technology.
+    """
+    ideas = CURATED_PROJECT_IDEAS
+    if domain and domain.lower() != "all":
+        ideas = [i for i in ideas if i["domain"].lower() == domain.lower()]
+    if difficulty and difficulty.lower() != "all":
+        ideas = [i for i in ideas if i["difficulty"].lower() == difficulty.lower()]
+    if technology and technology.lower() != "all":
+        t_clean = technology.lower()
+        ideas = [i for i in ideas if any(t_clean in t.lower() for t in i["technologies"])]
+    
+    enriched_ideas = []
+    for i in ideas:
+        idea_copy = dict(i)
+        idea_copy["suggested_technologies"] = i.get("technologies", [])
+        idea_copy["key_features"] = i.get("suggested_features", [])
+        enriched_ideas.append(idea_copy)
+
+    return {
+        "status": "success",
+        "ideas": enriched_ideas,
+        "domains": ["All", "Web Development", "AI/ML", "Cloud", "Data Science", "Cybersecurity", "IoT", "Mobile", "Blockchain"],
+        "difficulties": ["All", "Beginner", "Intermediate", "Advanced"],
+        "technologies": ["All", "React", "Python", "FastAPI", "Node.js", "PostgreSQL", "Docker", "Redis", "TypeScript", "Solidity", "React Native"]
+    }
+
+
+@app.get("/api/projects/github-sync")
+def sync_github_meta(url: str):
+    """
+    Official GitHub REST API sync for public repository metadata.
+    Strictly optional and gracefully handles rate limits and private repos.
+    """
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing repository URL")
+    res = fetch_github_repo_metadata(url)
+    return res
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns full project details. Validates user ownership.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        detail = get_project_detail(project_id, uid, cursor)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {"status": "success", "project": detail}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects")
+def create_new_project(
+    payload: ProjectCreateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Creates a new project, auto-generates interview prep & resume bullets, and awards XP.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        project = service_create_project(uid, payload.dict(), cursor)
+        conn.commit()
+        return {
+            "status": "success",
+            "project": project,
+            "message": "Project created successfully! +20 XP awarded."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/projects/{project_id}")
+def update_existing_project(
+    project_id: int,
+    payload: ProjectUpdateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Updates an existing project with strict ownership verification.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        project = service_update_project(project_id, uid, payload.dict(exclude_unset=True), cursor)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "project": project,
+            "message": "Project updated successfully."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_existing_project(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Deletes a project with strict ownership verification.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        success = service_delete_project(project_id, uid, cursor)
+        if not success:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {"status": "success", "message": "Project deleted successfully."}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/feature")
+def toggle_project_featured(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Toggles featured portfolio status.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        project = toggle_feature_project(project_id, uid, cursor)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "is_featured": project["is_featured"],
+            "project": project,
+            "message": "Portfolio feature status updated."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/interview-prep")
+def refresh_project_interview_prep(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Generates and saves structured interview preparation for this project.
+    Awards +50 XP on completion.
+    """
+    from gamification import award_xp
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        detail = get_project_detail(project_id, uid, cursor)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        
+        prep = generate_project_interview_prep(detail)
+        cursor.execute("UPDATE user_projects SET interview_prep = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (json.dumps(prep), project_id))
+        award_xp(uid, "project_interview_prep", reference_id=f"proj_prep_{project_id}", cursor=cursor)
+        conn.commit()
+        return {
+            "status": "success",
+            "interview_prep": prep,
+            "message": "Interview preparation generated! +50 XP awarded."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/resume-bullets")
+def refresh_project_resume_bullets(
+    project_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Generates tailored, action-oriented resume bullet points strictly from project information.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        detail = get_project_detail(project_id, uid, cursor)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        
+        bullets = generate_project_resume_bullets(detail)
+        cursor.execute("UPDATE user_projects SET resume_bullets = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s;", (json.dumps(bullets), project_id))
+        conn.commit()
+        return {
+            "status": "success",
+            "bullets": bullets,
+            "resume_bullets": bullets,
+            "message": "Resume bullet points generated."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/projects/{project_id}/milestones")
+def create_milestone(
+    project_id: int,
+    payload: MilestoneCreateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Adds a new milestone to a project.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        milestone = add_project_milestone(project_id, uid, payload.dict(), cursor)
+        if not milestone:
+            raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "milestone": milestone,
+            "message": "Milestone added."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/projects/milestones/{milestone_id}")
+def update_milestone(
+    milestone_id: int,
+    payload: MilestoneUpdateRequest,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Updates milestone title, description, or is_completed status.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        milestone = update_project_milestone(milestone_id, uid, payload.dict(exclude_unset=True), cursor)
+        if not milestone:
+            raise HTTPException(status_code=404, detail="Milestone not found or unauthorized")
+        conn.commit()
+        return {
+            "status": "success",
+            "milestone": milestone,
+            "message": "Milestone updated."
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/projects/milestones/{milestone_id}")
+def delete_milestone(
+    milestone_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Deletes milestone with ownership check.
+    """
+    uid = resolve_roadmap_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        success = delete_project_milestone(milestone_id, uid, cursor)
+        if not success:
+            raise HTTPException(status_code=404, detail="Milestone not found or unauthorized")
+        conn.commit()
+        return {"status": "success", "message": "Milestone deleted."}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
-
-
-
