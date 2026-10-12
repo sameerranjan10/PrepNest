@@ -702,7 +702,29 @@ def init_db():
             UNIQUE(user_id, topic_id)
         );
         CREATE INDEX IF NOT EXISTS idx_user_roadmap_progress_user ON user_roadmap_progress(user_id);
+
+        -- 10. AI Mentor Tables
+        CREATE TABLE IF NOT EXISTS mentor_conversations (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT NOT NULL DEFAULT 'New Conversation',
+            mode VARCHAR(50) NOT NULL DEFAULT 'general',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_mentor_conversations_user ON mentor_conversations(user_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS mentor_messages (
+            id SERIAL PRIMARY KEY,
+            conversation_id INTEGER NOT NULL REFERENCES mentor_conversations(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            content TEXT NOT NULL,
+            meta JSONB DEFAULT '{}'::jsonb,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_mentor_messages_conv ON mentor_messages(conversation_id, created_at ASC);
     """)
+
 
     
     # Check if questions need seeding

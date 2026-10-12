@@ -35,6 +35,16 @@ from resume_service import (
     map_roadmaps_and_dsa,
     match_company_and_role,
 )
+from mentor_service import (
+    detect_query_intent,
+    extract_query_entities,
+    build_selective_student_context,
+    build_token_efficient_system_prompt,
+    resolve_response_length,
+    call_groq_mentor,
+    get_student_context_summary,
+    MODE_CONFIGS,
+)
 
 app = FastAPI(title="PrepNest API & Aptitude Practice Module")
 
@@ -160,6 +170,22 @@ class RoadmapProgressRequest(BaseModel):
 class RoadmapResetRequest(BaseModel):
     domain_id: Optional[str] = None
     user_id: Optional[int] = None
+
+
+# -------------------------------------------------------------
+# AI Mentor Request Models
+# -------------------------------------------------------------
+
+class MentorChatRequest(BaseModel):
+    message: str
+    mode: Optional[str] = "general"
+    response_length: Optional[str] = "normal"
+    conversation_id: Optional[int] = None
+
+
+class CreateConversationRequest(BaseModel):
+    title: Optional[str] = "New Conversation"
+    mode: Optional[str] = "general"
 
 
 # -------------------------------------------------------------
@@ -2759,6 +2785,365 @@ def get_roadmap_recommendations(
         conn.close()
 
 
+
+
+# -------------------------------------------------------------
+# AI Mentor Module Endpoints
+# -------------------------------------------------------------
+
+def resolve_mentor_user_id(authorization: Optional[str] = None) -> int:
+    """
+    Safely resolves the authenticated user id from Neon Session or JWT token.
+    Falls back to user 1 for demo/local testing.
+    """
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            token = authorization.split(" ")[1]
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            try:
+                neon_sess = verify_neon_session(token, cursor)
+                if neon_sess:
+                    cursor.execute("SELECT id FROM users WHERE email = %s;", (neon_sess["email"],))
+                    u = cursor.fetchone()
+                    if u:
+                        return u["id"]
+                payload = decode_access_token(token)
+                if payload and "user_id" in payload:
+                    return int(payload["user_id"])
+                elif payload and "sub" in payload:
+                    cursor.execute("SELECT id FROM users WHERE email = %s;", (payload["sub"],))
+                    u = cursor.fetchone()
+                    if u:
+                        return u["id"]
+            finally:
+                cursor.close()
+                conn.close()
+        except Exception:
+            pass
+    return 1
+
+
+@app.get("/api/mentor/modes")
+def get_mentor_modes():
+    """
+    Returns the list of 8 specialized mentor modes.
+    """
+    modes = []
+    for key, val in MODE_CONFIGS.items():
+        modes.append({
+            "id": key,
+            "name": val["name"],
+            "description": val["description"],
+            "icon": val["icon"]
+        })
+    return {"modes": modes}
+
+
+@app.get("/api/mentor/context-summary")
+def get_mentor_context_summary_endpoint(
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns live personalized placement preparation stats for the UI dashboard card.
+    """
+    uid = resolve_mentor_user_id(authorization)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        summary = get_student_context_summary(uid, cursor)
+        return summary
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/mentor/conversations")
+def get_mentor_conversations(
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns all previous mentor conversations for the current user.
+    """
+    uid = resolve_mentor_user_id(authorization)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT c.id, c.title, c.mode, c.created_at, c.updated_at,
+                   COUNT(m.id) as message_count
+            FROM mentor_conversations c
+            LEFT JOIN mentor_messages m ON m.conversation_id = c.id
+            WHERE c.user_id = %s
+            GROUP BY c.id
+            ORDER BY c.updated_at DESC;
+        """, (uid,))
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("created_at"):
+                d["created_at"] = str(d["created_at"])
+            if d.get("updated_at"):
+                d["updated_at"] = str(d["updated_at"])
+            result.append(d)
+        return {"conversations": result}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/mentor/conversations")
+def create_mentor_conversation(
+    req: CreateConversationRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Creates a new conversation thread.
+    """
+    uid = resolve_mentor_user_id(authorization)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        title = (req.title or "New Conversation").strip()
+        mode = (req.mode or "general").strip().lower()
+        cursor.execute("""
+            INSERT INTO mentor_conversations (user_id, title, mode)
+            VALUES (%s, %s, %s)
+            RETURNING id, user_id, title, mode, created_at, updated_at;
+        """, (uid, title, mode))
+        row = cursor.fetchone()
+        conn.commit()
+        d = dict(row)
+        if d.get("created_at"):
+            d["created_at"] = str(d["created_at"])
+        if d.get("updated_at"):
+            d["updated_at"] = str(d["updated_at"])
+        return d
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/mentor/conversations/{conv_id}")
+def get_mentor_conversation_detail(
+    conv_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Fetches full message history for a conversation.
+    """
+    uid = resolve_mentor_user_id(authorization)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, user_id, title, mode, created_at, updated_at
+            FROM mentor_conversations
+            WHERE id = %s AND user_id = %s;
+        """, (conv_id, uid))
+        c_row = cursor.fetchone()
+        if not c_row:
+            cursor.execute("SELECT id FROM mentor_conversations WHERE id = %s;", (conv_id,))
+            if cursor.fetchone():
+                raise HTTPException(status_code=403, detail="Access denied: Cannot access another user's conversation")
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        conv_dict = dict(c_row)
+        if conv_dict.get("created_at"):
+            conv_dict["created_at"] = str(conv_dict["created_at"])
+        if conv_dict.get("updated_at"):
+            conv_dict["updated_at"] = str(conv_dict["updated_at"])
+
+        cursor.execute("""
+            SELECT id, conversation_id, role, content, meta, created_at
+            FROM mentor_messages
+            WHERE conversation_id = %s
+            ORDER BY created_at ASC;
+        """, (conv_id,))
+        messages = []
+        for m in cursor.fetchall():
+            md = dict(m)
+            if md.get("created_at"):
+                md["created_at"] = str(md["created_at"])
+            messages.append(md)
+
+        conv_dict["messages"] = messages
+        return conv_dict
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/mentor/conversations/{conv_id}")
+def delete_mentor_conversation(
+    conv_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Deletes a conversation and its messages.
+    """
+    uid = resolve_mentor_user_id(authorization)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, user_id FROM mentor_conversations WHERE id = %s;", (conv_id,))
+        conv_check = cursor.fetchone()
+        if not conv_check:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if conv_check["user_id"] != uid:
+            raise HTTPException(status_code=403, detail="Access denied: Cannot delete another user's conversation")
+
+        cursor.execute("DELETE FROM mentor_conversations WHERE id = %s AND user_id = %s RETURNING id;", (conv_id, uid))
+        deleted = cursor.fetchone()
+        conn.commit()
+        return {"status": "ok", "deleted_id": conv_id}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/mentor/chat")
+def mentor_chat_endpoint(
+    req: MentorChatRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Token-Efficient AI Placement Mentor Chat.
+    Detects question intent, retrieves ONLY minimal required context,
+    enforces concise output limits (quick/normal/detailed),
+    and safely tracks development token usage.
+    """
+    uid = resolve_mentor_user_id(authorization)
+    user_msg_text = req.message.strip()
+    if not user_msg_text:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    mode = (req.mode or "general").strip().lower()
+    conv_id = req.conversation_id
+
+    # Resolve token budget & response mode
+    response_length, max_tokens = resolve_response_length(user_msg_text, req.response_length)
+
+    # Detect query intent & mentioned entities
+    intent = detect_query_intent(user_msg_text, mode)
+    entities = extract_query_entities(user_msg_text)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # 1. Resolve or create conversation
+        if conv_id:
+            cursor.execute("SELECT id, mode, title, user_id FROM mentor_conversations WHERE id = %s;", (conv_id,))
+            existing_conv = cursor.fetchone()
+            if not existing_conv:
+                conv_id = None
+            elif existing_conv["user_id"] != uid:
+                raise HTTPException(status_code=403, detail="Access denied: Cannot message in another user's conversation")
+            else:
+                if existing_conv["mode"] != mode:
+                    cursor.execute("UPDATE mentor_conversations SET mode = %s WHERE id = %s;", (mode, conv_id))
+
+        if not conv_id:
+            short_title = user_msg_text[:42] + ("..." if len(user_msg_text) > 42 else "")
+            cursor.execute("""
+                INSERT INTO mentor_conversations (user_id, title, mode)
+                VALUES (%s, %s, %s)
+                RETURNING id;
+            """, (uid, short_title, mode))
+            conv_id = cursor.fetchone()["id"]
+            conn.commit()
+
+        # 2. Save user message to database
+        cursor.execute("""
+            INSERT INTO mentor_messages (conversation_id, role, content)
+            VALUES (%s, 'user', %s)
+            RETURNING id, created_at;
+        """, (conv_id, user_msg_text))
+        u_msg_row = cursor.fetchone()
+        conn.commit()
+
+        # 3. Retrieve conversation history (only last 4-6 messages)
+        cursor.execute("""
+            SELECT role, content
+            FROM mentor_messages
+            WHERE conversation_id = %s
+            ORDER BY created_at ASC;
+        """, (conv_id,))
+        history = [dict(r) for r in cursor.fetchall()]
+
+        # 4. SELECTIVE minimal context retrieval (Zero unnecessary data dumps)
+        compact_context = build_selective_student_context(uid, intent, entities, cursor)
+
+        # 5. Token-efficient system prompt assembly
+        system_prompt = build_token_efficient_system_prompt(intent, mode, compact_context, response_length, max_tokens)
+
+        # 6. Call Groq with strict max_tokens & monitoring
+        groq_result = call_groq_mentor(
+            messages=history,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            intent=intent,
+            response_length=response_length
+        )
+
+        reply_text = groq_result.get("response", "I am unable to generate a response at this moment.")
+        is_mock = groq_result.get("is_mock", False)
+        usage_info = groq_result.get("usage", {})
+        meta_info = {
+            "model": groq_result.get("model", "qwen/qwen3.8-27b"),
+            "usage": usage_info,
+            "is_mock": is_mock,
+            "mode": mode,
+            "intent": intent,
+            "response_length": response_length
+        }
+
+        # 7. Save assistant reply to database
+        cursor.execute("""
+            INSERT INTO mentor_messages (conversation_id, role, content, meta)
+            VALUES (%s, 'assistant', %s, %s)
+            RETURNING id, created_at;
+        """, (conv_id, reply_text, json.dumps(meta_info)))
+        a_msg_row = cursor.fetchone()
+
+        # 8. Update conversation timestamp
+        cursor.execute("""
+            UPDATE mentor_conversations
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s;
+        """, (conv_id,))
+        conn.commit()
+
+        return {
+            "success": True,
+            "conversation_id": conv_id,
+            "user_message": {
+                "id": u_msg_row["id"],
+                "role": "user",
+                "content": user_msg_text,
+                "created_at": str(u_msg_row["created_at"])
+            },
+            "assistant_message": {
+                "id": a_msg_row["id"],
+                "role": "assistant",
+                "content": reply_text,
+                "meta": meta_info,
+                "created_at": str(a_msg_row["created_at"])
+            },
+            "mode": mode,
+            "intent": intent,
+            "response_length": response_length,
+            "is_mock": is_mock,
+            "model": groq_result.get("model", "qwen/qwen3.8-27b"),
+            "usage": usage_info
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
 # =============================================================
 # GAMIFICATION & LEADERBOARD ENDPOINTS (Module 9 Requirement)
 # =============================================================
@@ -3389,9 +3774,7 @@ def delete_milestone(
         conn.close()
 
 
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
-
-
-
