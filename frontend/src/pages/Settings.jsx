@@ -387,8 +387,8 @@ export default function SettingsPage() {
   };
 
   const handleSignOut = () => {
+    navigate('/landing', { replace: true });
     logout();
-    navigate('/login');
   };
 
   const completion = useMemo(

@@ -373,8 +373,8 @@ export const Header = ({
                           type="button"
                           onClick={() => {
                             setDropdownOpen(false);
+                            navigate('/landing', { replace: true });
                             logout();
-                            navigate('/login');
                           }}
                           className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs text-[#DC2626] hover:bg-[#FEF2F2]/90 transition text-left cursor-pointer"
                         >

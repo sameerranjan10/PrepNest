@@ -1,5 +1,26 @@
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+let pendingRequests = 0;
+const pendingListeners = new Set();
+
+function notifyPendingListeners() {
+  pendingListeners.forEach((listener) => {
+    try {
+      listener(pendingRequests);
+    } catch {
+      // Ignore subscriber errors
+    }
+  });
+}
+
+export function subscribePendingRequests(listener) {
+  pendingListeners.add(listener);
+  listener(pendingRequests);
+  return () => {
+    pendingListeners.delete(listener);
+  };
+}
+
 export function getAuthToken() {
   try {
     return localStorage.getItem('prepnest_token') || null;
@@ -24,16 +45,23 @@ export async function apiFetch(path, options = {}) {
   };
 
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
-  const res = await fetch(url, { ...options, headers });
+  pendingRequests += 1;
+  notifyPendingListeners();
 
-  if (res.status === 401 && getAuthToken()) {
-    window.dispatchEvent(new CustomEvent('prepnest:auth-expired'));
+  try {
+    const res = await fetch(url, { ...options, headers });
+
+    if (res.status === 401 && getAuthToken()) {
+      window.dispatchEvent(new CustomEvent('prepnest:auth-expired'));
+    }
+
+    return res;
+  } finally {
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    notifyPendingListeners();
   }
-
-  return res;
 }
 
 export function notifyStatsUpdated() {
   window.dispatchEvent(new CustomEvent('prepnest:stats-updated'));
 }
-

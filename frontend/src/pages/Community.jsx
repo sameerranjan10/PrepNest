@@ -5,6 +5,7 @@ import { BlurDrop } from "@/components/ui/BlurDrop";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/apiClient";
 import { UserAvatar } from "@/components/UserAvatar";
+import { ComponentLoader } from "@/components/ui/PrepNestLoader";
 import {
   Users,
   Search,
@@ -46,7 +47,6 @@ import {
   SlidersHorizontal,
   Hash,
   Share2,
-  Loader2,
   AlertCircle,
 } from "lucide-react";
 
@@ -607,9 +607,8 @@ export default function CommunityPage() {
           )}
 
           {loading ? (
-            <div className="p-12 rounded-xl bg-[#FFFFFF] border border-[#E5E7EB] flex flex-col items-center justify-center gap-2 text-xs text-[#64748B]">
-              <Loader2 className="w-6 h-6 animate-spin text-[#FFA116]" />
-              <span>Loading community discussions, peers, and study groups...</span>
+            <div className="p-8 rounded-xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E5E7EB] dark:border-[#30363D]">
+              <ComponentLoader message="Preparing your workspace..." />
             </div>
           ) : (
             activeTab === "community" && (

@@ -15,8 +15,8 @@ import {
   Bot,
   Video,
   ExternalLink,
-  Loader2
 } from 'lucide-react';
+import { ComponentLoader } from '@/components/ui/PrepNestLoader';
 import { CompanyLogo } from './CompanyLogo';
 import { RecruitmentOverview } from './RecruitmentOverview';
 import { CompanyProgress } from './CompanyProgress';
@@ -231,10 +231,7 @@ export function CompanyDetails({
             </div>
 
             {dsaLoading ? (
-              <div className="py-12 flex flex-col items-center justify-center text-[#64748B] gap-2">
-                <Loader2 className="w-6 h-6 animate-spin text-[#FFA116]" />
-                <span className="text-xs font-medium">Loading {company.name} DSA problems...</span>
-              </div>
+              <ComponentLoader size="sm" message={`Loading ${company.name} DSA problems...`} />
             ) : dsaProblems.length === 0 ? (
               <div className="py-12 text-center space-y-3 bg-[#F7F8FA] rounded-xl border border-[#E5E7EB]">
                 <Code2 className="w-8 h-8 text-[#94A3B8] mx-auto" />

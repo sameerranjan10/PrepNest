@@ -7,7 +7,6 @@ import {
   Copy,
   Check,
   ArrowUpRight,
-  Loader2,
   PanelLeftOpen,
   PanelLeftClose,
   PanelTopOpen,
@@ -19,6 +18,7 @@ import {
   Minimize2,
   Menu
 } from 'lucide-react';
+import { ComponentLoader } from '@/components/ui/PrepNestLoader';
 import { MarkdownContent } from './MarkdownContent';
 import { MessageComposer } from './MessageComposer';
 import { getContextualPrompts } from './mentorConfig';
@@ -181,9 +181,8 @@ export function ChatWorkspace({
       {/* CHAT MESSAGES AREA */}
       <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 scrollbar-thin">
         {isLoadingConversation ? (
-          <div className="h-full flex flex-col items-center justify-center gap-2 text-[#64748B]">
-            <Loader2 className="w-6 h-6 animate-spin text-[#FFA116]" />
-            <span className="text-xs font-medium">Loading conversation...</span>
+          <div className="h-full flex items-center justify-center">
+            <ComponentLoader size="sm" message="Loading conversation..." />
           </div>
         ) : messages.length === 0 ? (
           /* EMPTY STATE */

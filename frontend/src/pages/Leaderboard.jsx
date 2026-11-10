@@ -11,11 +11,11 @@ import { LeaderboardPodium } from "@/components/leaderboard/LeaderboardPodium";
 import { LeaderboardPerformanceAndBadges } from "@/components/leaderboard/LeaderboardPerformanceAndBadges";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ComponentLoader } from "@/components/ui/PrepNestLoader";
 import {
   Flame,
   Search,
   X,
-  Loader2,
   Clock,
   Users,
   CheckCircle2,
@@ -156,9 +156,8 @@ export default function LeaderboardPage() {
           )}
 
           {loading ? (
-            <div className="p-12 rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] flex flex-col items-center justify-center gap-2 text-xs text-[#64748B]">
-              <Loader2 className="w-6 h-6 animate-spin text-[#F59E0B]" />
-              <span>Loading real-time standings from database...</span>
+            <div className="p-8 rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D]">
+              <ComponentLoader message="Syncing your progress..." />
             </div>
           ) : users.length === 0 ? (
             <div className="p-10 rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] text-center space-y-2">

@@ -9,6 +9,7 @@ import {
 import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { GlobalRequestBar } from "./components/ui/PrepNestLoader";
 
 import LandingPage from "./pages/Landing";
 import LoginPage from "./pages/Login";
@@ -29,6 +30,7 @@ import CommunityPage from "./pages/Community";
 export default function App() {
   return (
     <ThemeProvider>
+      <GlobalRequestBar />
       <AuthProvider>
         <Router>
         <Routes>

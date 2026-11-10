@@ -101,8 +101,9 @@ export const Sidebar = ({ activeRoute = 'dashboard', hiddenOnDesktop }) => {
   }, [desktopCollapsed, isExternallyControlled]);
 
   const handleLogout = () => {
+    setMobileOpen(false);
+    navigate('/landing', { replace: true });
     logout();
-    navigate('/login');
   };
 
   const getInitials = (name) => {
@@ -141,17 +142,33 @@ export const Sidebar = ({ activeRoute = 'dashboard', hiddenOnDesktop }) => {
           mini ? 'px-2 justify-center flex-col gap-1.5 py-2 h-auto' : 'px-3.5 justify-between'
         }`}
       >
-        <Link
-          to="/dashboard"
-          className="flex items-center justify-center group"
-          title="PrepNest Dashboard"
-        >
-          <BrandLogo
-            iconOnly={mini}
-            size={mini ? 'sm' : 'md'}
-            className="group-hover:opacity-90 transition-opacity"
-          />
-        </Link>
+        {mini && !isExternallyControlled ? (
+          <button
+            type="button"
+            onClick={() => setDesktopCollapsed(false)}
+            className="flex items-center justify-center group cursor-pointer"
+            title="Open sidebar"
+            aria-label="Open sidebar"
+          >
+            <BrandLogo
+              iconOnly
+              size="sm"
+              className="group-hover:opacity-90 group-hover:scale-105 transition-all"
+            />
+          </button>
+        ) : (
+          <Link
+            to="/dashboard"
+            className="flex items-center justify-center group"
+            title="PrepNest Dashboard"
+          >
+            <BrandLogo
+              iconOnly={mini}
+              size={mini ? 'sm' : 'md'}
+              className="group-hover:opacity-90 transition-opacity"
+            />
+          </Link>
+        )}
 
         {/* Desktop Sidebar Collapse / Expand Toggle Inside Sidebar Header */}
         {isFloatingDesktop && !isExternallyControlled && (

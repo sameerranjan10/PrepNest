@@ -8,7 +8,6 @@ import {
   UserCheck,
   History,
   HelpCircle,
-  Loader2,
   Play,
   RotateCcw,
   Trash2,
@@ -16,6 +15,7 @@ import {
   Info,
   BrainCircuit,
 } from "lucide-react";
+import { ButtonLoader } from "@/components/ui/PrepNestLoader";
 import {
   INTERVIEW_CATEGORIES,
   INTERVIEW_MODES,
@@ -86,7 +86,7 @@ export function InterviewSetup({
 
       {/* Active Session Refresh Recovery Banner */}
       {activeRecoverableSession && (
-        <div className="p-5 rounded-2xl bg-[#FFFBEB] dark:bg-[#F59E0B]/12 border border-[#F59E0B]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div className="p-5 rounded-2xl bg-[#FFFBEB] dark:bg-[#F59E0B]/15 border border-[#F59E0B]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse" />
@@ -141,7 +141,7 @@ export function InterviewSetup({
                   Select your focus track; the AI interviewer adapts questions and follow-ups dynamically.
                 </p>
               </div>
-              {configLoading && <Loader2 className="w-4 h-4 animate-spin text-[#F59E0B]" />}
+              {configLoading && <ButtonLoader size="sm" tone="brand" label="Loading configuration" />}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -155,7 +155,7 @@ export function InterviewSetup({
                     onClick={() => onSelectCategory(cat.id)}
                     className={`p-4 rounded-xl border text-left transition cursor-pointer space-y-2 ${
                       active
-                        ? "border-[#F59E0B] bg-[#FFFBEB] dark:bg-[#F59E0B]/12 ring-1 ring-[#F59E0B]/30"
+                        ? "border-[#F59E0B] bg-[#FFFBEB] dark:bg-[#F59E0B]/15 ring-1 ring-[#F59E0B]/30"
                         : "border-[#E2E8F0] dark:border-[#30363D] bg-[#F8FAFC] dark:bg-[#0D1117]/60 hover:border-[#F59E0B]/50"
                     }`}
                   >
@@ -208,7 +208,7 @@ export function InterviewSetup({
                       onClick={() => onSelectMode(m.id)}
                       className={`p-3.5 rounded-xl border text-left transition cursor-pointer space-y-1.5 ${
                         active
-                          ? "border-[#F59E0B] bg-[#FFFBEB] dark:bg-[#F59E0B]/12"
+                          ? "border-[#F59E0B] bg-[#FFFBEB] dark:bg-[#F59E0B]/15"
                           : "border-[#E2E8F0] dark:border-[#30363D] bg-[#F8FAFC] dark:bg-[#0D1117]/60 hover:border-[#F59E0B]/40"
                       }`}
                     >
@@ -244,7 +244,7 @@ export function InterviewSetup({
                       onClick={() => onSelectPersonality(p.id)}
                       className={`p-3.5 rounded-xl border text-left transition cursor-pointer space-y-1 ${
                         active
-                          ? "border-[#F59E0B] bg-[#FFFBEB] dark:bg-[#F59E0B]/12"
+                          ? "border-[#F59E0B] bg-[#FFFBEB] dark:bg-[#F59E0B]/15"
                           : "border-[#E2E8F0] dark:border-[#30363D] bg-[#F8FAFC] dark:bg-[#0D1117]/60 hover:border-[#F59E0B]/40"
                       }`}
                     >
@@ -394,7 +394,7 @@ export function InterviewSetup({
             >
               {isStarting ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <ButtonLoader size="sm" tone="light" label="Initializing AI Interviewer" />
                   <span>Initializing AI Interviewer...</span>
                 </>
               ) : (
