@@ -886,15 +886,79 @@ def init_db():
         CREATE TABLE IF NOT EXISTS mock_interview_questions (
             id SERIAL PRIMARY KEY,
             category VARCHAR(50) NOT NULL,
+            topic VARCHAR(80) DEFAULT 'General',
             question TEXT NOT NULL,
             keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
             difficulty VARCHAR(20) DEFAULT 'Medium',
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(category, question)
         );
+        ALTER TABLE mock_interview_questions ADD COLUMN IF NOT EXISTS topic VARCHAR(80) DEFAULT 'General';
         ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS answers_json JSONB DEFAULT '[]'::jsonb;
         ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS total_questions INTEGER DEFAULT 0;
         ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS attempted_count INTEGER DEFAULT 0;
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS session_id INTEGER;
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS company_name TEXT;
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS mode VARCHAR(30) DEFAULT 'realistic';
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS personality VARCHAR(30) DEFAULT 'professional';
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS evaluation_report JSONB;
+
+        CREATE TABLE IF NOT EXISTS mock_interview_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            category VARCHAR(50) NOT NULL DEFAULT 'Technical',
+            company_slug VARCHAR(100),
+            company_name TEXT,
+            target_role TEXT,
+            personality VARCHAR(30) NOT NULL DEFAULT 'professional',
+            mode VARCHAR(30) NOT NULL DEFAULT 'realistic',
+            experience_level VARCHAR(30) NOT NULL DEFAULT 'fresher',
+            duration_minutes INTEGER NOT NULL DEFAULT 15,
+            status VARCHAR(30) NOT NULL DEFAULT 'active',
+            current_phase VARCHAR(40) NOT NULL DEFAULT 'introduction',
+            current_difficulty VARCHAR(20) NOT NULL DEFAULT 'Medium',
+            planned_topics JSONB NOT NULL DEFAULT '[]'::jsonb,
+            asked_question_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            asked_prompts JSONB NOT NULL DEFAULT '[]'::jsonb,
+            conversation_summary TEXT NOT NULL DEFAULT '',
+            candidate_profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            time_remaining_seconds INTEGER NOT NULL DEFAULT 900,
+            current_turn_index INTEGER NOT NULL DEFAULT 0,
+            followups_used_for_topic INTEGER NOT NULL DEFAULT 0,
+            main_questions_asked INTEGER NOT NULL DEFAULT 0,
+            max_questions INTEGER NOT NULL DEFAULT 6,
+            pending_prompt JSONB,
+            evaluation_report JSONB,
+            result_id INTEGER,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP WITH TIME ZONE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mock_sessions_user_status ON mock_interview_sessions(user_id, status, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS mock_interview_turns (
+            id SERIAL PRIMARY KEY,
+            session_id INTEGER NOT NULL REFERENCES mock_interview_sessions(id) ON DELETE CASCADE,
+            turn_number INTEGER NOT NULL,
+            phase VARCHAR(40) NOT NULL,
+            question_source VARCHAR(50) NOT NULL DEFAULT 'verified_question_bank',
+            source_question_id INTEGER,
+            question_topic TEXT DEFAULT 'General',
+            question_difficulty VARCHAR(20) DEFAULT 'Medium',
+            followup_strategy VARCHAR(40),
+            interviewer_message TEXT NOT NULL,
+            question_text TEXT NOT NULL,
+            candidate_answer TEXT,
+            transcription_uncertain BOOLEAN NOT NULL DEFAULT FALSE,
+            response_time_seconds INTEGER NOT NULL DEFAULT 0,
+            evaluation_json JSONB,
+            practice_feedback JSONB,
+            is_complete BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            answered_at TIMESTAMP WITH TIME ZONE,
+            UNIQUE(session_id, turn_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mock_turns_session ON mock_interview_turns(session_id, turn_number);
 
         CREATE TABLE IF NOT EXISTS community_posts (
             id SERIAL PRIMARY KEY,
@@ -1155,32 +1219,52 @@ def init_db():
                 ct[8], ct[9], json.dumps(ct[10]), json.dumps(ct[11]), json.dumps(ct[12]), ct[13]
             ))
 
-    # Seed Mock Interview Questions if empty
-    cursor.execute("SELECT COUNT(*) as count FROM mock_interview_questions;")
-    if cursor.fetchone()["count"] == 0:
-        seed_interview_qs = [
-            ("Technical", "Explain the difference between optimistic concurrency control and pessimistic locking in database architecture.", ["optimistic", "pessimistic", "locking", "transaction", "concurrency"], "Medium"),
-            ("Technical", "What is the difference between a process and a thread?", ["process", "thread", "memory", "execution", "resource"], "Easy"),
-            ("Technical", "What is REST API and what are the main HTTP methods used in REST?", ["rest", "api", "http", "get", "post", "put", "delete"], "Easy"),
-            ("Technical", "Explain the concept of normalization in databases and why it is useful.", ["normalization", "database", "redundancy", "normal form", "data"], "Medium"),
-            ("Technical", "What is the difference between authentication and authorization?", ["authentication", "authorization", "identity", "permission", "access"], "Easy"),
-            ("HR", "Tell me about yourself and explain why you are interested in this role.", ["education", "experience", "skills", "project", "career"], "Easy"),
-            ("HR", "What is your biggest strength and how has it helped you?", ["strength", "example", "experience", "result"], "Easy"),
-            ("HR", "Tell me about a difficult problem you faced and how you solved it.", ["problem", "solution", "challenge", "result", "learn"], "Medium"),
-            ("HR", "Where do you see yourself in the next five years?", ["career", "growth", "skills", "experience", "goal"], "Easy"),
-            ("HR", "Why should we hire you?", ["skills", "experience", "value", "team", "contribute"], "Medium"),
-            ("Behavioral", "Tell me about a time when you worked as part of a team.", ["team", "communication", "responsibility", "result"], "Easy"),
-            ("Behavioral", "Describe a situation where you had to meet a tight deadline.", ["deadline", "planning", "priority", "result"], "Medium"),
-            ("Behavioral", "Tell me about a mistake you made and what you learned from it.", ["mistake", "learn", "improve", "experience"], "Medium"),
-            ("Behavioral", "How do you handle disagreement with a teammate?", ["communication", "listen", "discussion", "solution", "team"], "Medium"),
-            ("Behavioral", "Describe a situation where you demonstrated leadership.", ["leadership", "team", "decision", "responsibility", "result"], "Medium"),
-        ]
-        for cat, qtext, kws, diff in seed_interview_qs:
-            cursor.execute("""
-                INSERT INTO mock_interview_questions (category, question, keywords, difficulty)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (category, question) DO NOTHING;
-            """, (cat, qtext, json.dumps(kws), diff))
+    # Seed & Enrich Mock Interview Question Bank (idempotent, preserves existing rows)
+    seed_interview_qs = [
+        # Technical - Existing + Expanded Verified Bank
+        ("Technical", "DBMS", "Explain the difference between optimistic concurrency control and pessimistic locking in database architecture.", ["optimistic", "pessimistic", "locking", "transaction", "concurrency"], "Medium"),
+        ("Technical", "Operating Systems", "What is the difference between a process and a thread?", ["process", "thread", "memory", "execution", "resource"], "Easy"),
+        ("Technical", "System Design", "What is REST API and what are the main HTTP methods used in REST?", ["rest", "api", "http", "get", "post", "put", "delete"], "Easy"),
+        ("Technical", "DBMS", "Explain the concept of normalization in databases and why it is useful.", ["normalization", "database", "redundancy", "normal form", "data"], "Medium"),
+        ("Technical", "System Design", "What is the difference between authentication and authorization?", ["authentication", "authorization", "identity", "permission", "access"], "Easy"),
+        ("Technical", "Arrays & Strings", "Compare arrays and linked lists in terms of memory layout, index access, and insertion/deletion performance.", ["contiguous", "node", "pointer", "o(1)", "o(n)", "cache"], "Easy"),
+        ("Technical", "Linked Lists", "How do you detect a cycle in a singly linked list in O(1) extra space, and how do you find the cycle's entry node?", ["floyd", "slow", "fast", "pointer", "cycle", "o(1)"], "Medium"),
+        ("Technical", "Trees & Graphs", "Compare Breadth-First Search (BFS) and Depth-First Search (DFS) on graphs, including when you would pick each.", ["queue", "stack", "shortest path", "recursion", "level order", "visited"], "Medium"),
+        ("Technical", "Trees & Graphs", "What are the properties of a Binary Search Tree, and what happens to time complexity if it becomes skewed?", ["bst", "balanced", "o(log n)", "o(n)", "skewed", "avl"], "Medium"),
+        ("Technical", "Dynamic Programming", "Explain memoization versus tabulation in Dynamic Programming, and when a problem exhibits optimal substructure and overlapping subproblems.", ["memoization", "tabulation", "subproblem", "optimal substructure", "cache", "recursion"], "Medium"),
+        ("Technical", "Operating Systems", "What causes a deadlock in operating systems, and what are the four Coffman conditions required for it to occur?", ["mutual exclusion", "hold and wait", "no preemption", "circular wait", "deadlock"], "Medium"),
+        ("Technical", "Operating Systems", "How does virtual memory and paging allow processes to exceed physical RAM capacity?", ["virtual memory", "page table", "tlb", "page fault", "swap"], "Hard"),
+        ("Technical", "DBMS", "What are ACID properties in relational databases, and how does indexing using B+ Trees speed up queries?", ["atomicity", "consistency", "isolation", "durability", "b+ tree", "index"], "Medium"),
+        ("Technical", "Computer Networks", "Walk through what happens at the network level from entering a URL in a browser to receiving the HTTP response.", ["dns", "tcp", "handshake", "tls", "http", "ip"], "Medium"),
+        ("Technical", "Computer Networks", "Compare TCP and UDP, and give practical examples where UDP is preferred despite lacking reliability guarantees.", ["tcp", "udp", "handshake", "latency", "packet loss", "streaming"], "Easy"),
+        ("Technical", "OOP", "Explain the four core pillars of Object-Oriented Programming and distinguish compile-time polymorphism from runtime polymorphism.", ["encapsulation", "inheritance", "abstraction", "polymorphism", "overloading", "overriding"], "Easy"),
+        ("Technical", "System Design", "How would you design a URL shortener service like bit.ly, considering hashing collisions, database choice, and read-heavy caching?", ["hashing", "base62", "cache", "redis", "database", "latency"], "Hard"),
+        ("Technical", "Programming Fundamentals", "Compare pass-by-value and pass-by-reference semantics, and explain how hash tables resolve key collisions.", ["hash", "collision", "chaining", "open addressing", "reference", "memory"], "Medium"),
+        # HR Questions
+        ("HR", "Introduction", "Tell me about yourself and explain why you are interested in this role.", ["education", "experience", "skills", "project", "career"], "Easy"),
+        ("HR", "Strengths & Weaknesses", "What is your biggest strength and how has it helped you?", ["strength", "example", "experience", "result"], "Easy"),
+        ("HR", "Problem Solving", "Tell me about a difficult problem you faced and how you solved it.", ["problem", "solution", "challenge", "result", "learn"], "Medium"),
+        ("HR", "Career Goals", "Where do you see yourself in the next five years?", ["career", "growth", "skills", "experience", "goal"], "Easy"),
+        ("HR", "Role Fit", "Why should we hire you?", ["skills", "experience", "value", "team", "contribute"], "Medium"),
+        ("HR", "Company Fit", "Why do you want to join our company, and what excites you about our engineering or business domain?", ["company", "culture", "product", "impact", "role"], "Easy"),
+        ("HR", "Self Awareness", "What is one genuine weakness or development area you are actively working to improve?", ["weakness", "improve", "feedback", "action", "progress"], "Medium"),
+        ("HR", "Stress Management", "How do you handle high-pressure situations or competing priorities without compromising quality?", ["prioritize", "calm", "communication", "deadline", "focus"], "Medium"),
+        # Behavioral (STAR)
+        ("Behavioral", "Teamwork", "Tell me about a time when you worked as part of a team.", ["team", "communication", "responsibility", "result"], "Easy"),
+        ("Behavioral", "Execution", "Describe a situation where you had to meet a tight deadline.", ["deadline", "planning", "priority", "result"], "Medium"),
+        ("Behavioral", "Ownership", "Tell me about a mistake you made and what you learned from it.", ["mistake", "learn", "improve", "experience"], "Medium"),
+        ("Behavioral", "Conflict Resolution", "How do you handle disagreement with a teammate?", ["communication", "listen", "discussion", "solution", "team"], "Medium"),
+        ("Behavioral", "Leadership", "Describe a situation where you demonstrated leadership.", ["leadership", "team", "decision", "responsibility", "result"], "Medium"),
+        ("Behavioral", "Ambiguity", "Tell me about a time you had to solve an ambiguous problem with incomplete requirements.", ["clarify", "stakeholder", "assumption", "action", "outcome"], "Hard"),
+        ("Behavioral", "Customer Impact", "Describe a time you went beyond your assigned task to improve reliability or user experience.", ["initiative", "impact", "metric", "ownership", "result"], "Medium"),
+    ]
+    for cat, topic, qtext, kws, diff in seed_interview_qs:
+        cursor.execute("""
+            INSERT INTO mock_interview_questions (category, topic, question, keywords, difficulty)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (category, question) DO UPDATE
+            SET topic = COALESCE(NULLIF(mock_interview_questions.topic, 'General'), EXCLUDED.topic);
+        """, (cat, topic, qtext, json.dumps(kws), diff))
 
     # Seed Community Structural Groups & Events if empty (counts come from real member/rsvp tables)
     cursor.execute("SELECT COUNT(*) as count FROM community_groups;")

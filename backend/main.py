@@ -50,6 +50,17 @@ from mentor_service import (
     get_student_context_summary,
     MODE_CONFIGS,
 )
+from interview_engine import (
+    PERSONALITY_PROMPTS,
+    MODE_RULES,
+    build_interview_candidate_context,
+    create_interview_session,
+    process_candidate_turn,
+    generate_practice_hint,
+    generate_full_interview_report,
+    evaluate_candidate_response,
+    _format_session_response,
+)
 
 app = FastAPI(title="PrepNest API & Aptitude Practice Module")
 
@@ -4083,6 +4094,435 @@ class MockInterviewCompleteRequest(BaseModel):
     attempted_count: Optional[int] = 0
 
 
+class CreateInterviewSessionRequest(BaseModel):
+    category: str = "Technical"
+    company_name: Optional[str] = None
+    target_role: Optional[str] = None
+    personality: str = "professional"
+    mode: str = "realistic"
+    experience_level: str = "fresher"
+    duration_minutes: int = 15
+    project_data: Optional[Dict[str, Any]] = None
+
+
+class InterviewRespondRequest(BaseModel):
+    turn_number: int
+    candidate_answer: str = ""
+    response_time_seconds: int = 0
+    time_remaining_seconds: Optional[int] = None
+    transcription_uncertain: bool = False
+
+
+class CompleteInterviewSessionRequest(BaseModel):
+    turn_number: Optional[int] = None
+    final_answer: Optional[str] = None
+    response_time_seconds: Optional[int] = 0
+    transcription_uncertain: bool = False
+
+
+@app.get("/api/interviews/config")
+def get_mock_interview_config(authorization: Optional[str] = Header(None)):
+    """
+    Returns interview configuration metadata: real supported companies from company_tracks,
+    personalized candidate context summary from PostgreSQL, personalities, and modes.
+    """
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT slug, name, category, role, hiring_difficulty, sections
+            FROM company_tracks
+            ORDER BY CASE WHEN is_upcoming THEN 1 ELSE 0 END, name ASC;
+            """
+        )
+        companies = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT category, COUNT(*)::int AS count FROM mock_interview_questions GROUP BY category ORDER BY category ASC;"
+        )
+        bank_counts = {r["category"]: r["count"] for r in cursor.fetchall()}
+
+        candidate_ctx = build_interview_candidate_context(uid, cursor)
+
+        return {
+            "companies": companies,
+            "bank_counts": bank_counts,
+            "personalities": [
+                {"id": k, "label": v["label"], "description": v["tone"]}
+                for k, v in PERSONALITY_PROMPTS.items()
+            ],
+            "modes": [
+                {"id": k, "label": v["label"], "description": v["description"]}
+                for k, v in MODE_RULES.items()
+            ],
+            "candidate_context": {
+                "full_name": candidate_ctx.get("full_name"),
+                "target_role": candidate_ctx.get("target_role"),
+                "target_companies": candidate_ctx.get("target_companies"),
+                "skills": candidate_ctx.get("skills"),
+                "preferred_language": candidate_ctx.get("preferred_language"),
+                "prep_level": candidate_ctx.get("prep_level"),
+                "dsa_solved_count": candidate_ctx.get("dsa_solved_count"),
+                "weak_interview_categories": candidate_ctx.get("weak_interview_categories"),
+            },
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/interviews/active")
+def get_active_interview_session(authorization: Optional[str] = Header(None)):
+    """
+    Returns the latest active (in-progress) interview session for refresh recovery.
+    """
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT * FROM mock_interview_sessions
+            WHERE user_id = %s AND status = 'active'
+            ORDER BY updated_at DESC
+            LIMIT 1;
+            """,
+            (uid,),
+        )
+        session = cursor.fetchone()
+        if not session:
+            return {"active_session": None}
+        session = dict(session)
+        cursor.execute(
+            "SELECT * FROM mock_interview_turns WHERE session_id = %s ORDER BY turn_number ASC;",
+            (session["id"],),
+        )
+        turns = [dict(r) for r in cursor.fetchall()]
+        last_practice = turns[-2].get("practice_feedback") if len(turns) >= 2 else None
+        payload = _format_session_response(
+            session, turns, session.get("pending_prompt") or {}, last_practice
+        )
+        return {"active_session": payload}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/interviews/sessions")
+def start_ai_interview_session(
+    payload: CreateInterviewSessionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Starts a stateful, adaptive AI mock interview session and persists Turn 1 in PostgreSQL.
+    """
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Mark any stale active sessions abandoned so only one active session remains
+        cursor.execute(
+            "UPDATE mock_interview_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP WHERE user_id = %s AND status = 'active';",
+            (uid,),
+        )
+        session_payload = create_interview_session(
+            user_id=uid,
+            category=payload.category,
+            company_name=payload.company_name,
+            target_role=payload.target_role,
+            personality=payload.personality,
+            mode=payload.mode,
+            experience_level=payload.experience_level,
+            duration_minutes=payload.duration_minutes,
+            project_data=payload.project_data,
+            cursor=cursor,
+        )
+        conn.commit()
+        return session_payload
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to start interview session: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/interviews/sessions/{session_id}/respond")
+def respond_ai_interview_session(
+    session_id: int,
+    payload: InterviewRespondRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Submits candidate answer for current turn, evaluates via LLM rubric,
+    executes adaptive follow-up / lifecycle transition, and returns next turn.
+    """
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        res = process_candidate_turn(
+            session_id=session_id,
+            user_id=uid,
+            turn_number=payload.turn_number,
+            candidate_answer=payload.candidate_answer,
+            response_time_seconds=payload.response_time_seconds,
+            time_remaining_seconds=payload.time_remaining_seconds,
+            transcription_uncertain=payload.transcription_uncertain,
+            cursor=cursor,
+        )
+        conn.commit()
+        return res
+    except ValueError as ve:
+        conn.rollback()
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to process interview response: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/interviews/sessions/{session_id}/hint")
+def get_interview_practice_hint(
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        hint_text = generate_practice_hint(session_id, uid, cursor)
+        return {"hint": hint_text}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/interviews/sessions/{session_id}/abandon")
+def abandon_ai_interview_session(
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE mock_interview_sessions SET status = 'abandoned', updated_at = CURRENT_TIMESTAMP WHERE id = %s AND user_id = %s;",
+            (session_id, uid),
+        )
+        conn.commit()
+        return {"status": "abandoned", "session_id": session_id}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/interviews/sessions/{session_id}")
+def get_ai_interview_session_detail(
+    session_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM mock_interview_sessions WHERE id = %s AND user_id = %s;",
+            (session_id, uid),
+        )
+        session = cursor.fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Interview session not found")
+        session = dict(session)
+        cursor.execute(
+            "SELECT * FROM mock_interview_turns WHERE session_id = %s ORDER BY turn_number ASC;",
+            (session_id,),
+        )
+        turns = [dict(r) for r in cursor.fetchall()]
+        return _format_session_response(
+            session, turns, session.get("pending_prompt") or {}, None
+        )
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/interviews/sessions/{session_id}/complete")
+def complete_ai_interview_session(
+    session_id: int,
+    payload: CompleteInterviewSessionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Completes an AI interview session idempotently, generates the full LLM evaluation report,
+    persists to mock_interview_results, and awards XP once.
+    """
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM mock_interview_sessions WHERE id = %s AND user_id = %s FOR UPDATE;",
+            (session_id, uid),
+        )
+        session = cursor.fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Interview session not found")
+        session = dict(session)
+
+        # Prevent duplicate evaluation or double XP award
+        if session["status"] == "completed" and session.get("evaluation_report"):
+            cursor.execute(
+                "SELECT total_xp, streak FROM users WHERE id = %s;",
+                (uid,),
+            )
+            u_stats = cursor.fetchone() or {}
+            return {
+                "status": "completed",
+                "session_id": session_id,
+                "interview_id": session.get("result_id"),
+                "evaluation_report": session["evaluation_report"],
+                "xp_earned": 0,
+                "total_xp": u_stats.get("total_xp", 0),
+                "streak": u_stats.get("streak", 0),
+                "already_completed": True,
+            }
+
+        cursor.execute(
+            "SELECT * FROM mock_interview_turns WHERE session_id = %s ORDER BY turn_number ASC;",
+            (session_id,),
+        )
+        turns = [dict(r) for r in cursor.fetchall()]
+
+        # If candidate typed a response on the current unanswered turn before clicking End/Finish, evaluate it cleanly
+        if turns and payload.final_answer and payload.final_answer.strip():
+            last_t = turns[-1]
+            if (
+                last_t["phase"] != "introduction"
+                and last_t.get("candidate_answer") is None
+                and (payload.turn_number is None or payload.turn_number == last_t["turn_number"])
+            ):
+                pending = session.get("pending_prompt") or {}
+                ev = evaluate_candidate_response(
+                    question_text=last_t["question_text"],
+                    answer_text=payload.final_answer,
+                    category=session["category"],
+                    topic=last_t.get("question_topic") or session["category"],
+                    difficulty=last_t.get("question_difficulty") or session["current_difficulty"],
+                    keywords=pending.get("keywords") or [],
+                    transcription_uncertain=payload.transcription_uncertain,
+                )
+                cursor.execute(
+                    """
+                    UPDATE mock_interview_turns
+                    SET candidate_answer = %s,
+                        transcription_uncertain = %s,
+                        response_time_seconds = %s,
+                        evaluation_json = %s,
+                        answered_at = CURRENT_TIMESTAMP
+                    WHERE id = %s;
+                    """,
+                    (
+                        payload.final_answer,
+                        bool(payload.transcription_uncertain),
+                        max(0, int(payload.response_time_seconds or 0)),
+                        json.dumps(ev),
+                        last_t["id"],
+                    ),
+                )
+                last_t["candidate_answer"] = payload.final_answer
+                last_t["evaluation_json"] = ev
+
+        snap = session.get("candidate_profile_snapshot") or {}
+        candidate_ctx = snap.get("candidate") or build_interview_candidate_context(uid, cursor)
+        company_ctx = snap.get("company") or {}
+
+        report = generate_full_interview_report(session, turns, candidate_ctx, company_ctx, cursor)
+        overall = report["overall"]
+
+        cat_label = (
+            f"{session['company_name']} · {session['category']}"
+            if session.get("company_name")
+            else session["category"]
+        )
+        cursor.execute(
+            """
+            INSERT INTO mock_interview_results
+            (user_id, session_id, category, company_name, mode, personality, score,
+             average_words, keyword_matches, strengths, improvements, answers_json,
+             total_questions, attempted_count, evaluation_report, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            RETURNING id;
+            """,
+            (
+                uid,
+                session_id,
+                cat_label,
+                session.get("company_name"),
+                session["mode"],
+                session["personality"],
+                overall["score"],
+                overall["average_words"],
+                overall["keyword_matches"],
+                json.dumps(report["strengths"]),
+                json.dumps(report["improvements"]),
+                json.dumps(report["question_analysis"]),
+                overall["total_questions"],
+                overall["questions_attempted"],
+                json.dumps(report),
+            ),
+        )
+        interview_id = cursor.fetchone()["id"]
+
+        cursor.execute(
+            """
+            UPDATE mock_interview_sessions
+            SET status = 'completed',
+                current_phase = 'conclusion',
+                evaluation_report = %s,
+                result_id = %s,
+                completed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s;
+            """,
+            (json.dumps(report), interview_id, session_id),
+        )
+
+        xp_res = award_xp(
+            user_id=uid,
+            activity_type="mock_interview_completed",
+            reference_id=f"mock_{interview_id}",
+            cursor=cursor,
+        )
+        conn.commit()
+
+        return {
+            "status": "completed",
+            "session_id": session_id,
+            "interview_id": interview_id,
+            "evaluation_report": report,
+            "xp_earned": xp_res.get("xp_earned", 100),
+            "total_xp": xp_res.get("total_xp", 100),
+            "streak": xp_res.get("streak", 1),
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to complete interview session: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.get("/api/interviews/questions")
 def get_mock_interview_questions():
     """
@@ -4092,13 +4532,14 @@ def get_mock_interview_questions():
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT id, category, question, keywords, difficulty FROM mock_interview_questions ORDER BY category ASC, id ASC;"
+            "SELECT id, category, COALESCE(topic, 'General') AS topic, question, keywords, difficulty FROM mock_interview_questions ORDER BY category ASC, id ASC;"
         )
         rows = cursor.fetchall()
         grouped: Dict[str, List[Dict[str, Any]]] = {}
         for r in rows:
             grouped.setdefault(r["category"], []).append({
                 "id": r["id"],
+                "topic": r["topic"],
                 "question": r["question"],
                 "keywords": r["keywords"] or [],
                 "difficulty": r["difficulty"] or "Medium",
@@ -4119,8 +4560,11 @@ def get_mock_interview_history(
     try:
         cursor.execute(
             """
-            SELECT id, category, score, average_words, keyword_matches,
-                   strengths, improvements, total_questions, attempted_count, created_at
+            SELECT id, session_id, category, company_name, mode, personality, score,
+                   average_words, keyword_matches, strengths, improvements,
+                   total_questions, attempted_count,
+                   (evaluation_report IS NOT NULL) AS has_report,
+                   created_at
             FROM mock_interview_results
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -4197,23 +4641,25 @@ def record_mock_interview(
 @app.get("/api/leaderboard")
 def get_leaderboard(
     period: str = "overall",
+    batch: Optional[str] = None,
     user_id: Optional[int] = None,
     authorization: Optional[str] = Header(None)
 ):
     """
     Single source of truth leaderboard endpoint.
     Returns:
-      - Current user card (Rank, Level, XP, Problems, Streak, Readiness)
+      - Current user card (Rank, Percentile, Level, XP, Problems, Aptitude, Roadmap, Streak, Readiness)
       - Top 3 performers for selected period
       - Complete rankings list sorted deterministically
-      - XP rules and period metadata
+      - Achievements, real rank progression history, totals, and XP rules
     Supported periods: 'weekly', 'monthly', 'overall'
     """
     uid = resolve_roadmap_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        data = get_leaderboard_data(period=period, current_user_id=uid, cursor=cursor)
+        data = get_leaderboard_data(period=period, current_user_id=uid, cursor=cursor, batch=batch)
+        conn.commit()
         return data
     finally:
         cursor.close()

@@ -3,84 +3,90 @@ import { Sidebar } from "@/components/Sidebar";
 import { Header } from "@/components/Header";
 import { BlurDrop } from "@/components/ui/BlurDrop";
 import { useAuth } from "@/context/AuthContext";
-import {
-  Trophy,
-  Crown,
-  Medal,
-  Flame,
-  Target,
-  Search,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  Zap,
-  Star,
-  Award,
-  Code2,
-  BrainCircuit,
-  Briefcase,
-  ChevronRight,
-  ChevronUp,
-  ChevronDown,
-  Users,
-  CalendarDays,
-  BarChart3,
-  Sparkles,
-  ShieldCheck,
-  CheckCircle2,
-  RotateCcw,
-  Plus,
-  Lock,
-  X,
-  Loader2,
-  HelpCircle,
-} from "lucide-react";
-import { Badge, DifficultyBadge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import { useTheme } from "@/context/ThemeContext";
 import { apiFetch } from "@/lib/apiClient";
 import { UserAvatar } from "@/components/UserAvatar";
+import { LeaderboardHeroAndOverview } from "@/components/leaderboard/LeaderboardHeroAndOverview";
+import { LeaderboardPodium } from "@/components/leaderboard/LeaderboardPodium";
+import { LeaderboardPerformanceAndBadges } from "@/components/leaderboard/LeaderboardPerformanceAndBadges";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import {
+  Flame,
+  Search,
+  X,
+  Loader2,
+  Clock,
+  Users,
+  CheckCircle2,
+  TrendingUp,
+  TrendingDown,
+} from "lucide-react";
 
 export default function LeaderboardPage() {
   const { user } = useAuth();
+  const { isDark } = useTheme();
+
   const [users, setUsers] = useState([]);
   const [apiCurrentUser, setApiCurrentUser] = useState(null);
+  const [periodInfo, setPeriodInfo] = useState(null);
+  const [availableBatches, setAvailableBatches] = useState([]);
+  const [activeParticipants, setActiveParticipants] = useState(0);
+  const [totalLearners, setTotalLearners] = useState(0);
+  const [totals, setTotals] = useState({ dsa_total: 0, aptitude_total: 0, roadmap_total: 0 });
+  const [achievements, setAchievements] = useState([]);
+  const [rankHistory, setRankHistory] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [period, setPeriod] = useState("all"); // 'all' | 'weekly' | 'monthly'
+
+  const [period, setPeriod] = useState("all"); // 'all' | 'monthly' | 'weekly'
+  const [batchFilter, setBatchFilter] = useState("all");
   const [sortBy, setSortBy] = useState("xp"); // 'xp' | 'problems' | 'streak' | 'readiness'
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
 
-  const fetchLeaderboard = useCallback(async (selectedPeriod = period) => {
-    setLoading(true);
-    setLoadError(null);
-    const backendPeriod = selectedPeriod === "all" ? "overall" : selectedPeriod;
-    try {
-      const res = await apiFetch(`/api/leaderboard?period=${encodeURIComponent(backendPeriod)}`);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+  const fetchLeaderboard = useCallback(
+    async (selectedPeriod = period, selectedBatch = batchFilter) => {
+      setLoading(true);
+      setLoadError(null);
+      const backendPeriod = selectedPeriod === "all" ? "overall" : selectedPeriod;
+      const params = new URLSearchParams({ period: backendPeriod });
+      if (selectedBatch && selectedBatch !== "all") {
+        params.set("batch", selectedBatch);
       }
-      const data = await res.json();
-      setUsers(data.rankings || []);
-      setApiCurrentUser(data.current_user || null);
-    } catch (err) {
-      console.error("Leaderboard fetch failed:", err);
-      setLoadError("Unable to load leaderboard rankings from the server.");
-      setUsers([]);
-      setApiCurrentUser(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [period]);
+
+      try {
+        const res = await apiFetch(`/api/leaderboard?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        setUsers(data.rankings || []);
+        setApiCurrentUser(data.current_user || null);
+        setPeriodInfo(data.period_info || null);
+        setAvailableBatches(data.available_batches || []);
+        setActiveParticipants(Number(data.active_participants || 0));
+        setTotalLearners(Number(data.total_learners || 0));
+        setTotals(data.totals || { dsa_total: 0, aptitude_total: 0, roadmap_total: 0 });
+        setAchievements(data.achievements || []);
+        setRankHistory(data.rank_history || []);
+      } catch (err) {
+        console.error("Leaderboard fetch failed:", err);
+        setLoadError("Unable to load leaderboard rankings from PostgreSQL.");
+        setUsers([]);
+        setApiCurrentUser(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [period, batchFilter]
+  );
 
   useEffect(() => {
-    fetchLeaderboard(period);
-  }, [period, user?.id, fetchLeaderboard]);
+    fetchLeaderboard(period, batchFilter);
+  }, [period, batchFilter, user?.id, user?.avatar_url, fetchLeaderboard]);
 
-  const getScore = useCallback((u) => Number(u?.xp || 0), []);
-
-  // Ranked users list
   const rankedUsers = useMemo(() => {
     let list = [...users];
 
@@ -90,7 +96,8 @@ export default function LeaderboardPage() {
         (u) =>
           (u.name || "").toLowerCase().includes(q) ||
           (u.username && u.username.toLowerCase().includes(q)) ||
-          (u.role && u.role.toLowerCase().includes(q))
+          (u.role && u.role.toLowerCase().includes(q)) ||
+          (u.institution && u.institution.toLowerCase().includes(q))
       );
     }
 
@@ -98,75 +105,49 @@ export default function LeaderboardPage() {
       if (sortBy === "problems") return (b.problems || 0) - (a.problems || 0);
       if (sortBy === "streak") return (b.streak || 0) - (a.streak || 0);
       if (sortBy === "readiness") return (b.readiness || 0) - (a.readiness || 0);
-      return getScore(b) - getScore(a);
+      return Number(b.xp || 0) - Number(a.xp || 0);
     });
 
     return list;
-  }, [users, search, sortBy, getScore]);
+  }, [users, search, sortBy]);
 
   const currentUser = useMemo(() => {
-    return (
-      rankedUsers.find((u) => u.is_current_user) ||
-      apiCurrentUser ||
-      null
-    );
-  }, [rankedUsers, apiCurrentUser]);
-
-  const currentRank = useMemo(() => {
-    if (currentUser?.rank) return currentUser.rank;
-    const idx = rankedUsers.findIndex((u) => u.is_current_user);
-    return idx >= 0 ? idx + 1 : "—";
-  }, [rankedUsers, currentUser]);
+    return users.find((u) => u.is_current_user) || apiCurrentUser || null;
+  }, [users, apiCurrentUser]);
 
   const topThree = useMemo(() => {
-    return rankedUsers.slice(0, 3);
-  }, [rankedUsers]);
+    // Podium reflects true XP leaders from backend rankings
+    return users.slice(0, 3);
+  }, [users]);
+
+  const highestXp = useMemo(() => {
+    const maxVal = Math.max(0, ...users.map((u) => Number(u.xp || 0)));
+    return maxVal > 0 ? maxVal : 1;
+  }, [users]);
 
   return (
-    <div className="flex min-h-screen bg-[#F7F8FA] text-[#262626] font-sans">
+    <div className="flex min-h-screen bg-[#F8FAFC] dark:bg-[#0D1117] text-[#1E293B] dark:text-[#E6EDF3] font-sans">
       <Sidebar activeRoute="leaderboard" />
       <div className="flex-1 flex flex-col min-w-0">
         <Header defaultCollapsed />
 
-        <BlurDrop as="main" className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
-          {/* Header Card */}
-          <div className="bg-white border border-[#E5E7EB] rounded-xl p-5 sm:p-6 md:pr-[136px] lg:pr-[148px] shadow-subtle flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-            <div className="space-y-1.5 max-w-2xl">
-              <div className="flex items-center gap-2">
-                <Badge variant="accent" size="sm">
-                  Global Rankings
-                </Badge>
-                <Badge variant="neutral" size="sm">
-                  Placement Batch 2026
-                </Badge>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-[#262626] tracking-tight">
-                Batch Leaderboard & Readiness Rankings
-              </h1>
-              <p className="text-sm text-[#64748B]">
-                Compete with fellow developers across LeetCode DSA problem solves, aptitude drills, and placement milestones.
-              </p>
-            </div>
-
-            {/* Current User Quick Summary */}
-            <div className="p-4 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center gap-4 shrink-0 w-full md:w-auto">
-              <div className="w-12 h-12 rounded-full bg-[#FFA116] text-white flex items-center justify-center font-bold text-base">
-                #{currentRank}
-              </div>
-              <div>
-                <span className="text-[11px] font-semibold text-[#64748B] uppercase">Your Position</span>
-                <div className="text-sm font-bold text-[#262626]">{currentUser?.name || user?.full_name || "Account"}</div>
-                <span className="text-xs text-[#FFA116] font-semibold">{(currentUser?.xp ?? 0).toLocaleString()} Total XP</span>
-              </div>
-            </div>
-          </div>
+        <BlurDrop as="main" className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-[1440px]">
+          {/* Hero + 4 Statistical Overview Cards */}
+          <LeaderboardHeroAndOverview
+            authUser={user}
+            currentUser={currentUser}
+            totalCandidates={totalLearners}
+            activeParticipants={activeParticipants}
+            period={period}
+            periodInfo={periodInfo}
+          />
 
           {loadError && !loading && (
-            <div className="p-4 rounded-xl bg-[#FEF2F2] border border-[#DC2626]/25 text-xs text-[#DC2626] flex items-center justify-between gap-3">
+            <div className="p-4 rounded-xl bg-[#FEF2F2] dark:bg-[#F85149]/15 border border-[#DC2626]/25 text-xs text-[#DC2626] dark:text-[#F85149] flex items-center justify-between gap-3">
               <span>{loadError}</span>
               <button
                 type="button"
-                onClick={() => fetchLeaderboard(period)}
+                onClick={() => fetchLeaderboard(period, batchFilter)}
                 className="font-semibold underline cursor-pointer"
               >
                 Retry
@@ -175,310 +156,372 @@ export default function LeaderboardPage() {
           )}
 
           {loading ? (
-            <Card className="p-10 flex flex-col items-center justify-center gap-2 text-xs text-[#64748B]">
-              <Loader2 className="w-6 h-6 animate-spin text-[#FFA116]" />
+            <div className="p-12 rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] flex flex-col items-center justify-center gap-2 text-xs text-[#64748B]">
+              <Loader2 className="w-6 h-6 animate-spin text-[#F59E0B]" />
               <span>Loading real-time standings from database...</span>
-            </Card>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="p-10 rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] text-center space-y-2">
+              <Users className="w-7 h-7 text-[#94A3B8] mx-auto" />
+              <p className="text-sm font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                No candidates found for this filter
+              </p>
+              <p className="text-xs text-[#64748B]">
+                Try switching back to All Batches or All Time to view platform standings.
+              </p>
+            </div>
           ) : (
             <>
+              {/* Premium Top 3 Podium */}
+              <LeaderboardPodium
+                topThree={topThree}
+                authUser={user}
+                onSelectUser={setSelectedUser}
+              />
 
-          {/* Top 3 Podium */}
-          {topThree.length === 3 && (
-            <Card className="p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <Crown className="w-5 h-5 text-[#FFA116]" />
-                <h3 className="text-base font-bold text-[#262626]">Top Performers</h3>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end max-w-3xl mx-auto pt-4">
-                {/* 2nd Place */}
-                <div className="order-2 md:order-1 p-5 rounded-xl border border-[#E5E7EB] bg-[#F7F8FA] text-center space-y-2 flex flex-col items-center">
-                  <div className="w-8 h-8 rounded-full bg-[#94A3B8] text-white font-bold text-xs flex items-center justify-center">
-                    2
-                  </div>
-                  <UserAvatar
-                    src={topThree[1].is_current_user ? (user?.avatar_url || topThree[1].avatar_url) : topThree[1].avatar_url}
-                    name={topThree[1].name}
-                    initials={topThree[1].avatar}
-                    size="lg"
-                    className="border border-[#E5E7EB] shadow-subtle"
-                    fallbackClassName="bg-white text-[#262626]"
-                  />
-                  <h4 className="text-sm font-bold text-[#262626] truncate max-w-[160px]">{topThree[1].name}</h4>
-                  <p className="text-xs text-[#64748B] truncate">{topThree[1].role}</p>
-                  <div className="text-xs font-bold text-[#262626]">{getScore(topThree[1], period).toLocaleString()} XP</div>
-                  <Badge variant="neutral" size="xs">
-                    {topThree[1].problems} Solved
-                  </Badge>
-                </div>
-
-                {/* 1st Place */}
-                <div className="order-1 md:order-2 p-6 rounded-xl border-2 border-[#FFA116] bg-[#FFF8EE] text-center space-y-2 flex flex-col items-center shadow-subtle relative -translate-y-2">
-                  <div className="absolute -top-3.5 px-3 py-0.5 rounded-full bg-[#FFA116] text-white text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                    <Crown className="w-3 h-3" /> Winner
-                  </div>
-                  <div className="w-9 h-9 rounded-full bg-[#FFA116] text-white font-bold text-sm flex items-center justify-center">
-                    1
-                  </div>
-                  <UserAvatar
-                    src={topThree[0].is_current_user ? (user?.avatar_url || topThree[0].avatar_url) : topThree[0].avatar_url}
-                    name={topThree[0].name}
-                    initials={topThree[0].avatar}
-                    size="xl"
-                    className="border-2 border-[#FFA116] shadow-sm"
-                    fallbackClassName="bg-white text-[#FFA116]"
-                  />
-                  <h4 className="text-base font-bold text-[#262626] truncate max-w-[180px]">{topThree[0].name}</h4>
-                  <p className="text-xs text-[#64748B] truncate">{topThree[0].role}</p>
-                  <div className="text-sm font-extrabold text-[#FFA116]">{getScore(topThree[0], period).toLocaleString()} XP</div>
-                  <Badge variant="accent" size="xs">
-                    {topThree[0].problems} Solved • {topThree[0].streak}d Streak
-                  </Badge>
-                </div>
-
-                {/* 3rd Place */}
-                <div className="order-3 p-5 rounded-xl border border-[#E5E7EB] bg-[#F7F8FA] text-center space-y-2 flex flex-col items-center">
-                  <div className="w-8 h-8 rounded-full bg-[#B45309] text-white font-bold text-xs flex items-center justify-center">
-                    3
-                  </div>
-                  <UserAvatar
-                    src={topThree[2].is_current_user ? (user?.avatar_url || topThree[2].avatar_url) : topThree[2].avatar_url}
-                    name={topThree[2].name}
-                    initials={topThree[2].avatar}
-                    size="lg"
-                    className="border border-[#E5E7EB] shadow-subtle"
-                    fallbackClassName="bg-white text-[#262626]"
-                  />
-                  <h4 className="text-sm font-bold text-[#262626] truncate max-w-[160px]">{topThree[2].name}</h4>
-                  <p className="text-xs text-[#64748B] truncate">{topThree[2].role}</p>
-                  <div className="text-xs font-bold text-[#262626]">{getScore(topThree[2], period).toLocaleString()} XP</div>
-                  <Badge variant="neutral" size="xs">
-                    {topThree[2].problems} Solved
-                  </Badge>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Filter Toolbar */}
-          <Card className="p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="inline-flex items-center p-1 bg-[#F1F3F5] rounded-lg gap-1 text-xs w-full sm:w-auto">
-              {[
-                { id: "all", label: "All Time" },
-                { id: "weekly", label: "This Week" },
-                { id: "monthly", label: "This Month" },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setPeriod(tab.id)}
-                  className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-md font-semibold transition ${
-                    period === tab.id
-                      ? "bg-white text-[#262626] shadow-sm"
-                      : "text-[#64748B] hover:text-[#262626]"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2.5 w-full sm:w-auto">
-              {/* Search */}
-              <div className="relative flex-1 sm:w-60">
-                <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Search candidate..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full bg-[#F7F8FA] border border-[#E5E7EB] text-xs text-[#262626] placeholder-[#94A3B8] pl-9 pr-3 py-2 rounded-lg outline-none focus:bg-white focus:border-[#FFA116] transition"
-                />
-              </div>
-
-              {/* Sort By */}
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="bg-[#F7F8FA] border border-[#E5E7EB] text-xs text-[#262626] px-3 py-2 rounded-lg outline-none focus:bg-white focus:border-[#FFA116] cursor-pointer"
-              >
-                <option value="xp">Sort: XP</option>
-                <option value="problems">Sort: Problems</option>
-                <option value="streak">Sort: Streak</option>
-                <option value="readiness">Sort: Readiness</option>
-              </select>
-            </div>
-          </Card>
-
-          {/* Full Rankings Table */}
-          <Card className="overflow-hidden">
-            <div className="p-4 bg-[#F7F8FA] border-b border-[#E5E7EB] flex items-center justify-between text-xs text-[#64748B]">
-              <span>Showing <strong>{rankedUsers.length}</strong> candidates</span>
-              <span>Your Rank: <strong className="text-[#FFA116]">#{currentRank}</strong></span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-[#E5E7EB] bg-white text-[11px] text-[#64748B] uppercase tracking-wider font-semibold">
-                    <th className="py-3 px-4 text-center w-14">Rank</th>
-                    <th className="py-3 px-4">Candidate</th>
-                    <th className="py-3 px-4 w-28">Score (XP)</th>
-                    <th className="py-3 px-4 w-28">Problems</th>
-                    <th className="py-3 px-4 w-28">Streak</th>
-                    <th className="py-3 px-4 w-32">Readiness</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#F1F3F5] text-xs">
-                  {rankedUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-10 text-center text-xs text-[#64748B]">
-                        No candidates match your search filter.
-                      </td>
-                    </tr>
-                  ) : rankedUsers.map((u, idx) => {
-                    const isSelf = Boolean(u.is_current_user);
-                    const rankNum = idx + 1;
-
-                    return (
-                      <tr
-                        key={u.id}
-                        onClick={() => setSelectedUser(u)}
-                        className={`hover:bg-[#F7F8FA] cursor-pointer transition ${
-                          isSelf ? "bg-[#FFF8EE]/60 font-medium" : ""
+              {/* Filter Toolbar */}
+              <section className="rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] p-4 shadow-xs space-y-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  {/* Time Period Tabs */}
+                  <div className="inline-flex items-center p-1 bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D] rounded-xl gap-1 text-xs w-full lg:w-auto">
+                    {[
+                      { id: "all", label: "All Time" },
+                      { id: "monthly", label: "This Month" },
+                      { id: "weekly", label: "This Week" },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setPeriod(tab.id)}
+                        className={`flex-1 lg:flex-initial px-3.5 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
+                          period === tab.id
+                            ? "bg-[#FFFFFF] dark:bg-[#161B22] text-[#1E293B] dark:text-[#E6EDF3] shadow-xs border border-[#E2E8F0] dark:border-[#30363D]"
+                            : "text-[#64748B] hover:text-[#1E293B] dark:hover:text-[#E6EDF3]"
                         }`}
                       >
-                        {/* Rank */}
-                        <td className="py-3 px-4 text-center font-bold">
-                          {rankNum === 1 ? (
-                            <span className="text-[#FFA116]">🥇 1</span>
-                          ) : rankNum === 2 ? (
-                            <span className="text-[#94A3B8]">🥈 2</span>
-                          ) : rankNum === 3 ? (
-                            <span className="text-[#B45309]">🥉 3</span>
-                          ) : (
-                            <span className={isSelf ? "text-[#FFA116]" : "text-[#64748B]"}>
-                              #{rankNum}
-                            </span>
-                          )}
-                        </td>
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
 
-                        {/* Candidate */}
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <UserAvatar
-                              src={isSelf ? (user?.avatar_url || u.avatar_url) : u.avatar_url}
-                              name={u.name}
-                              initials={u.avatar}
-                              size="sm"
-                              fallbackClassName={isSelf ? "bg-[#FFA116] text-white" : "bg-[#F1F3F5] text-[#262626]"}
-                            />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-semibold text-sm text-[#262626] truncate">
-                                  {u.name}
-                                </span>
-                                {isSelf && (
-                                  <span className="text-[10px] bg-[#FFA116] text-white font-bold px-1.5 py-0.2 rounded-full">
-                                    YOU
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-[11px] text-[#64748B] truncate">{u.role}</p>
-                            </div>
-                          </div>
-                        </td>
+                  {/* Search, Sort & Batch Filters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 lg:flex items-center gap-2.5 w-full lg:w-auto">
+                    <div className="relative sm:col-span-1 lg:w-56">
+                      <Search className="w-3.5 h-3.5 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Search candidate, role..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="lc-input text-xs pl-8"
+                      />
+                    </div>
 
-                        {/* Score XP */}
-                        <td className="py-3 px-4 font-bold text-[#262626]">
-                          {getScore(u, period).toLocaleString()} XP
-                        </td>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="lc-input text-xs cursor-pointer sm:w-auto"
+                    >
+                      <option value="xp">Sort: XP Earned</option>
+                      <option value="problems">Sort: DSA Solved</option>
+                      <option value="streak">Sort: Active Streak</option>
+                      <option value="readiness">Sort: Readiness</option>
+                    </select>
 
-                        {/* Problems Solved */}
-                        <td className="py-3 px-4 text-[#64748B]">
-                          <span className="font-semibold text-[#262626]">{u.problems}</span> Qs
-                        </td>
+                    <select
+                      value={batchFilter}
+                      onChange={(e) => setBatchFilter(e.target.value)}
+                      disabled={availableBatches.length === 0}
+                      className="lc-input text-xs cursor-pointer sm:w-auto disabled:opacity-60"
+                      aria-label="Filter by graduation batch"
+                    >
+                      <option value="all">
+                        {availableBatches.length > 0 ? "All Batches" : "Batch: All Users"}
+                      </option>
+                      {availableBatches.map((b) => (
+                        <option key={b} value={b}>
+                          Batch {b}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-                        {/* Streak */}
-                        <td className="py-3 px-4">
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#FFA116]">
-                            <Flame className="w-3.5 h-3.5 fill-[#FFA116]" /> {u.streak}d
-                          </span>
-                        </td>
+                {/* Clear Period & Timezone Definition */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#E2E8F0] dark:border-[#30363D] text-[11px] text-[#64748B] dark:text-[#8B949E]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <span>
+                      Window:{" "}
+                      <strong className="text-[#1E293B] dark:text-[#E6EDF3]">
+                        {periodInfo?.label || "All accumulated activity (UTC)"}
+                      </strong>
+                    </span>
+                  </span>
+                  <span>
+                    Showing <strong className="text-[#1E293B] dark:text-[#E6EDF3]">{rankedUsers.length}</strong> of{" "}
+                    {totalLearners} candidates
+                  </span>
+                </div>
+              </section>
 
-                        {/* Placement Readiness */}
-                        <td className="py-3 px-4">
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-[11px] font-semibold text-[#16A34A]">
-                              <span>{u.readiness}%</span>
-                            </div>
-                            <div className="w-full bg-[#F1F3F5] h-1.5 rounded-full overflow-hidden">
-                              <div
-                                className="bg-[#16A34A] h-full rounded-full"
-                                style={{ width: `${u.readiness}%` }}
-                              />
-                            </div>
-                          </div>
-                        </td>
+              {/* Main Ranking Table */}
+              <section className="rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] shadow-xs overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#E2E8F0] dark:border-[#30363D] bg-[#F8FAFC] dark:bg-[#0D1117]/75 text-[11px] text-[#64748B] dark:text-[#8B949E] uppercase tracking-wider font-semibold">
+                        <th className="py-3 px-4 w-20 text-center">Rank</th>
+                        <th className="py-3 px-4 min-w-[220px]">Candidate</th>
+                        <th className="py-3 px-4 w-36">XP Earned</th>
+                        <th className="py-3 px-4 w-28">DSA Solved</th>
+                        <th className="py-3 px-4 w-28 hidden md:table-cell">Aptitude</th>
+                        <th className="py-3 px-4 w-28 hidden sm:table-cell">Streak</th>
+                        <th className="py-3 px-4 w-36">Readiness</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-          </>
+                    </thead>
+                    <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#21262D] text-xs">
+                      {rankedUsers.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-10 text-center text-xs text-[#64748B]">
+                            No candidates match your search criteria.
+                          </td>
+                        </tr>
+                      ) : (
+                        rankedUsers.map((u, idx) => {
+                          const isSelf = Boolean(u.is_current_user);
+                          const displayRank = sortBy === "xp" && !search.trim() ? u.rank : idx + 1;
+                          const avatarSrc = isSelf ? user?.avatar_url || u.avatar_url : u.avatar_url;
+                          const xpWidth = Math.max(
+                            u.xp > 0 ? 6 : 0,
+                            Math.min(100, Math.round((Number(u.xp || 0) / highestXp) * 100))
+                          );
+
+                          return (
+                            <tr
+                              key={u.id}
+                              onClick={() => setSelectedUser(u)}
+                              className={`cursor-pointer transition ${
+                                isSelf
+                                  ? "bg-[#FFFBEB] dark:bg-[#F59E0B]/10 hover:bg-[#FEF3C7]/60 dark:hover:bg-[#F59E0B]/15"
+                                  : "hover:bg-[#F8FAFC] dark:hover:bg-[#21262D]/70"
+                              }`}
+                            >
+                              {/* Rank */}
+                              <td className="py-3.5 px-4 text-center font-bold tabular-nums">
+                                <div className="inline-flex items-center justify-center gap-1">
+                                  {displayRank === 1 ? (
+                                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#F59E0B] text-white text-[11px]">
+                                      1
+                                    </span>
+                                  ) : displayRank === 2 ? (
+                                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#94A3B8] text-white text-[11px]">
+                                      2
+                                    </span>
+                                  ) : displayRank === 3 ? (
+                                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#B45309] text-white text-[11px]">
+                                      3
+                                    </span>
+                                  ) : (
+                                    <span className={isSelf ? "text-[#F59E0B]" : "text-[#64748B]"}>
+                                      #{displayRank}
+                                    </span>
+                                  )}
+                                  {u.rankChange !== null && u.rankChange !== undefined && u.rankChange !== 0 && (
+                                    <span
+                                      className={`text-[10px] inline-flex items-center ${
+                                        u.rankChange > 0 ? "text-[#16A34A]" : "text-[#DC2626]"
+                                      }`}
+                                      title="Rank movement vs previous period"
+                                    >
+                                      {u.rankChange > 0 ? (
+                                        <TrendingUp className="w-3 h-3" />
+                                      ) : (
+                                        <TrendingDown className="w-3 h-3" />
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Candidate */}
+                              <td className="py-3.5 px-4">
+                                <div className="flex items-center gap-3">
+                                  <UserAvatar
+                                    src={avatarSrc}
+                                    name={u.name}
+                                    initials={u.avatar}
+                                    size="sm"
+                                    className={isSelf ? "ring-2 ring-[#F59E0B]/60" : ""}
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-xs sm:text-sm text-[#1E293B] dark:text-[#E6EDF3] truncate max-w-[160px] sm:max-w-[220px]">
+                                        {u.name}
+                                      </span>
+                                      {isSelf && (
+                                        <span className="px-1.5 py-0.5 rounded-full bg-[#F59E0B] text-white text-[9px] font-bold">
+                                          YOU
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-[#64748B] dark:text-[#8B949E] truncate max-w-[240px]">
+                                      {u.role}
+                                      {u.batch ? ` · Batch ${u.batch}` : ""}
+                                      {u.institution ? ` · ${u.institution}` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* XP Earned */}
+                              <td className="py-3.5 px-4 tabular-nums">
+                                <div className="space-y-1">
+                                  <span className="font-bold text-[#1E293B] dark:text-[#E6EDF3] block">
+                                    {Number(u.xp || 0).toLocaleString()} XP
+                                  </span>
+                                  <div className="h-1 w-24 rounded-full bg-[#E2E8F0] dark:bg-[#21262D] overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-[#F59E0B]"
+                                      style={{ width: `${xpWidth}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* DSA Solved */}
+                              <td className="py-3.5 px-4 tabular-nums">
+                                <span className="font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                                  {u.problems ?? 0}
+                                </span>
+                                <span className="text-[#64748B] ml-1 text-[11px]">Qs</span>
+                              </td>
+
+                              {/* Aptitude Solved */}
+                              <td className="py-3.5 px-4 tabular-nums hidden md:table-cell">
+                                <span className="font-semibold text-[#1E293B] dark:text-[#E6EDF3]">
+                                  {u.aptitude_solved ?? 0}
+                                </span>
+                                <span className="text-[#64748B] ml-1 text-[11px]">Qs</span>
+                              </td>
+
+                              {/* Active Streak */}
+                              <td className="py-3.5 px-4 tabular-nums hidden sm:table-cell">
+                                <span className="inline-flex items-center gap-1 font-semibold text-[#F59E0B]">
+                                  <Flame className="w-3.5 h-3.5 fill-[#F59E0B]" />
+                                  {u.streak ?? 0}d
+                                </span>
+                              </td>
+
+                              {/* Placement Readiness */}
+                              <td className="py-3.5 px-4 tabular-nums">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[11px] font-bold text-[#16A34A]">
+                                    <span>{u.readiness ?? 0}%</span>
+                                  </div>
+                                  <div className="w-full bg-[#E2E8F0] dark:bg-[#21262D] h-1.5 rounded-full overflow-hidden">
+                                    <div
+                                      className="bg-[#16A34A] h-full rounded-full transition-all"
+                                      style={{ width: `${u.readiness ?? 0}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              {/* Your Performance Breakdown + Achievements & Badges */}
+              <LeaderboardPerformanceAndBadges
+                currentUser={currentUser}
+                totals={totals}
+                achievements={achievements}
+                rankHistory={rankHistory}
+                isDark={isDark}
+              />
+            </>
           )}
         </BlurDrop>
       </div>
 
-      {/* User Inspect Modal */}
+      {/* Candidate Public Profile Modal */}
       {selectedUser && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl bg-white border border-[#E5E7EB] p-6 space-y-5 shadow-2xl">
-            <div className="flex items-start justify-between border-b border-[#F1F3F5] pb-3">
-              <div className="flex items-center gap-3">
+        <div
+          className="fixed inset-0 z-50 bg-[#0F172A]/50 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] p-6 space-y-5 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-[#E2E8F0] dark:border-[#30363D] pb-3.5">
+              <div className="flex items-center gap-3 min-w-0">
                 <UserAvatar
-                  src={selectedUser.is_current_user ? (user?.avatar_url || selectedUser.avatar_url) : selectedUser.avatar_url}
+                  src={
+                    selectedUser.is_current_user
+                      ? user?.avatar_url || selectedUser.avatar_url
+                      : selectedUser.avatar_url
+                  }
                   name={selectedUser.name}
                   initials={selectedUser.avatar}
                   size="lg"
-                  className="border border-[#E5E7EB]"
-                  fallbackClassName="bg-[#F7F8FA] text-[#262626]"
+                  className="border border-[#E2E8F0] dark:border-[#30363D]"
                 />
-                <div>
-                  <h3 className="text-base font-bold text-[#262626]">{selectedUser.name}</h3>
-                  <p className="text-xs text-[#64748B]">{selectedUser.role}</p>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-[#1E293B] dark:text-[#E6EDF3] truncate">
+                      {selectedUser.name}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-[#FFFBEB] border border-[#F59E0B]/30 text-[10px] font-bold text-[#F59E0B]">
+                      #{selectedUser.rank}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#64748B] truncate">{selectedUser.role}</p>
+                  {(selectedUser.institution || selectedUser.batch) && (
+                    <p className="text-[11px] text-[#94A3B8] truncate">
+                      {[selectedUser.institution, selectedUser.batch ? `Batch ${selectedUser.batch}` : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <button
+                type="button"
                 onClick={() => setSelectedUser(null)}
-                className="p-1 rounded-md text-[#64748B] hover:text-[#262626] hover:bg-[#F1F3F5] transition"
+                className="p-1.5 rounded-lg text-[#64748B] hover:text-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#21262D] transition cursor-pointer"
+                aria-label="Close profile modal"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Metrics */}
-            <div className="grid grid-cols-3 gap-3 p-3 bg-[#F7F8FA] rounded-lg border border-[#E5E7EB] text-center text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 bg-[#F8FAFC] dark:bg-[#0D1117] rounded-xl border border-[#E2E8F0] dark:border-[#30363D] text-center text-xs">
               <div>
-                <span className="text-[#64748B] block text-[10px] uppercase">Total XP</span>
-                <strong className="text-sm font-bold text-[#262626]">{selectedUser.xp.toLocaleString()}</strong>
+                <span className="text-[#64748B] block text-[10px] uppercase">XP</span>
+                <strong className="text-sm font-bold">{Number(selectedUser.xp || 0).toLocaleString()}</strong>
               </div>
               <div>
-                <span className="text-[#64748B] block text-[10px] uppercase">Problems</span>
-                <strong className="text-sm font-bold text-[#262626]">{selectedUser.problems}</strong>
+                <span className="text-[#64748B] block text-[10px] uppercase">DSA</span>
+                <strong className="text-sm font-bold">{selectedUser.problems ?? 0}</strong>
+              </div>
+              <div>
+                <span className="text-[#64748B] block text-[10px] uppercase">Aptitude</span>
+                <strong className="text-sm font-bold">{selectedUser.aptitude_solved ?? 0}</strong>
               </div>
               <div>
                 <span className="text-[#64748B] block text-[10px] uppercase">Streak</span>
-                <strong className="text-sm font-bold text-[#FFA116]">{selectedUser.streak} Days</strong>
+                <strong className="text-sm font-bold text-[#F59E0B]">{selectedUser.streak ?? 0}d</strong>
               </div>
             </div>
 
-            {/* Badges */}
             {selectedUser.badges && selectedUser.badges.length > 0 && (
               <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-[#64748B]">Earned Badges:</span>
+                <span className="text-xs font-semibold text-[#64748B]">Earned Badges</span>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedUser.badges.map((b, i) => (
                     <Badge key={i} variant="accent" size="xs">
@@ -489,12 +532,28 @@ export default function LeaderboardPage() {
               </div>
             )}
 
-            <div className="pt-2 flex justify-end">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setSelectedUser(null)}
-              >
+            {selectedUser.recent_activities && selectedUser.recent_activities.length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-[#64748B]">Recent Verified Activity</span>
+                <div className="space-y-1.5">
+                  {selectedUser.recent_activities.map((act, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D]"
+                    >
+                      <span className="flex items-center gap-1.5 text-[#1E293B] dark:text-[#E6EDF3]">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" />
+                        {act.title}
+                      </span>
+                      <span className="font-bold text-[#F59E0B]">+{act.amount} XP</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="pt-1 flex justify-end">
+              <Button variant="secondary" size="sm" onClick={() => setSelectedUser(null)}>
                 Close
               </Button>
             </div>
