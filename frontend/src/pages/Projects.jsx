@@ -1274,16 +1274,16 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
           MODAL 1: ADD / EDIT PROJECT
       ========================================================= */}
       {showAddEditModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden my-6 text-[#262626]">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-2xl max-h-[92dvh] flex flex-col shadow-xl overflow-hidden my-2 sm:my-6 text-[#262626]">
             {/* Modal Header */}
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116]">
+            <div className="p-4 sm:p-6 border-b border-[#E5E7EB] flex items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116] shrink-0">
                   <FolderGit2 className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-[#262626]">
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold text-[#262626]">
                     {editingProject ? 'Edit Project' : 'Add New Project'}
                   </h3>
                   <p className="text-xs text-[#64748B]">
@@ -1296,14 +1296,15 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
                   setShowAddEditModal(false);
                   resetForm();
                 }}
-                className="text-[#64748B] hover:text-[#262626] p-2 rounded-lg hover:bg-[#F1F3F5] transition cursor-pointer"
+                aria-label="Close modal"
+                className="w-10 h-10 inline-flex items-center justify-center text-[#64748B] hover:text-[#262626] rounded-lg hover:bg-[#F1F3F5] transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleSubmitProject} className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+            <form onSubmit={handleSubmitProject} className="p-4 sm:p-6 overflow-y-auto space-y-5 sm:space-y-6 flex-1 text-xs">
               {/* GitHub Auto-Sync Box */}
               <div className="p-4 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1589,16 +1590,16 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
           MODAL 2: PROJECT DETAIL & MILESTONES VIEW
       ========================================================= */}
       {showDetailModal && selectedProject && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-xl overflow-hidden my-4 text-[#262626]">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-4xl max-h-[92dvh] flex flex-col shadow-xl overflow-hidden my-2 sm:my-4 text-[#262626]">
             {/* Header */}
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116]">
+            <div className="p-4 sm:p-6 border-b border-[#E5E7EB] flex flex-wrap items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116] shrink-0">
                   <FolderGit2 className="w-5 h-5" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-[#D97706] bg-[#FFF8EE] border border-[#FFA116]/30 px-2 py-0.5 rounded">
                       {selectedProject.project_type}
                     </span>
@@ -1968,16 +1969,16 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
           MODAL 3: INTERVIEW PREPARATION
       ========================================================= */}
       {showInterviewModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-xl overflow-hidden my-4 text-[#262626]">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-3xl max-h-[92dvh] flex flex-col shadow-xl overflow-hidden my-2 sm:my-4 text-[#262626]">
             {/* Header */}
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between bg-[#FFF8EE]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFFFFF] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116] shadow-xs">
+            <div className="p-4 sm:p-6 border-b border-[#E5E7EB] flex items-start sm:items-center justify-between gap-3 bg-[#FFF8EE]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#FFFFFF] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116] shadow-xs shrink-0">
                   <Sparkles className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-[#262626] flex items-center gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold text-[#262626] flex flex-wrap items-center gap-2">
                     Project Interview Preparation
                     <span className="text-[10px] font-bold uppercase tracking-wider text-[#16A34A] bg-[#E6FAF6] border border-[#16A34A]/20 px-2 py-0.5 rounded">
                       +50 XP
@@ -1990,14 +1991,15 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
               </div>
               <button
                 onClick={() => setShowInterviewModal(false)}
-                className="text-[#64748B] hover:text-[#262626] p-2 rounded-lg hover:bg-[#FFFFFF] transition cursor-pointer"
+                aria-label="Close modal"
+                className="w-10 h-10 inline-flex items-center justify-center text-[#64748B] hover:text-[#262626] rounded-lg hover:bg-[#FFFFFF] transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Body */}
-            <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1 text-xs">
               {interviewPrepLoading ? (
                 <ComponentLoader size="md" message="Fetching interview questions..." />
               ) : interviewPrepData ? (
@@ -2127,15 +2129,15 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
           MODAL 4: ADD TO RESUME (ATS BULLETS)
       ========================================================= */}
       {showResumeModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-2xl flex flex-col shadow-xl overflow-hidden my-4 text-[#262626]">
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116]">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-2xl max-h-[92dvh] flex flex-col shadow-xl overflow-hidden my-2 sm:my-4 text-[#262626]">
+            <div className="p-4 sm:p-6 border-b border-[#E5E7EB] flex items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116] shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-[#262626]">ATS-Ready Resume Project Bullets</h3>
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold text-[#262626]">ATS-Ready Resume Project Bullets</h3>
                   <p className="text-xs text-[#64748B]">
                     Formulated strictly from your inputs using action-verbs and tech specifications. No invented metrics.
                   </p>
@@ -2143,13 +2145,14 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
               </div>
               <button
                 onClick={() => setShowResumeModal(false)}
-                className="text-[#64748B] hover:text-[#262626] p-2 rounded-lg hover:bg-[#F1F3F5] transition cursor-pointer"
+                aria-label="Close modal"
+                className="w-10 h-10 inline-flex items-center justify-center text-[#64748B] hover:text-[#262626] rounded-lg hover:bg-[#F1F3F5] transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
               {resumeBulletsLoading ? (
                 <ComponentLoader size="sm" message="Generating ATS resume bullet points..." />
               ) : resumeData ? (
@@ -2224,15 +2227,15 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
           MODAL 5: PORTFOLIO EXPORT MODAL
       ========================================================= */}
       {showPortfolioExportModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-2xl flex flex-col shadow-xl overflow-hidden my-4 text-[#262626]">
-            <div className="p-6 border-b border-[#E5E7EB] flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116]">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl w-full max-w-2xl max-h-[92dvh] flex flex-col shadow-xl overflow-hidden my-2 sm:my-4 text-[#262626]">
+            <div className="p-4 sm:p-6 border-b border-[#E5E7EB] flex items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-[#FFF8EE] border border-[#FFA116]/30 flex items-center justify-center text-[#FFA116] shrink-0">
                   <Star className="w-5 h-5 fill-[#FFA116]" />
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-[#262626]">Generated Portfolio Summary</h3>
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-bold text-[#262626]">Generated Portfolio Summary</h3>
                   <p className="text-xs text-[#64748B]">
                     Markdown summary of your featured projects ready to copy into your personal site, LinkedIn, or GitHub README.
                   </p>
@@ -2240,13 +2243,14 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
               </div>
               <button
                 onClick={() => setShowPortfolioExportModal(false)}
-                className="text-[#64748B] hover:text-[#262626] p-2 rounded-lg hover:bg-[#F1F3F5] transition cursor-pointer"
+                aria-label="Close modal"
+                className="w-10 h-10 inline-flex items-center justify-center text-[#64748B] hover:text-[#262626] rounded-lg hover:bg-[#F1F3F5] transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
               <textarea
                 readOnly
                 rows={10}

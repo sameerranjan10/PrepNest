@@ -53,9 +53,14 @@ export const Header = ({
   const navigate = useNavigate();
   const location = useLocation();
   const searchInputRef = useRef(null);
+  const mobileSearchInputRef = useRef(null);
+  const desktopDropdownRef = useRef(null);
+  const mobileDropdownRef = useRef(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileDropdownOpen, setMobileDropdownOpen] = useState(false);
   const [headerStats, setHeaderStats] = useState({
     streak: null,
     credits: null,
@@ -140,9 +145,49 @@ export const Header = ({
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     if (searchQuery.trim()) {
+      setMobileSearchOpen(false);
       navigate(`/dsa?search=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
+
+  // Close open dropdowns/search on route change, Escape, or outside pointer click
+  useEffect(() => {
+    setDropdownOpen(false);
+    setMobileDropdownOpen(false);
+    setMobileSearchOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!dropdownOpen && !mobileDropdownOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (desktopDropdownRef.current && !desktopDropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+      if (mobileDropdownRef.current && !mobileDropdownRef.current.contains(e.target)) {
+        setMobileDropdownOpen(false);
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setDropdownOpen(false);
+        setMobileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown, { passive: true });
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [dropdownOpen, mobileDropdownOpen]);
+
+  useEffect(() => {
+    if (mobileSearchOpen) {
+      mobileSearchInputRef.current?.focus();
+    }
+  }, [mobileSearchOpen]);
 
   const toggleMobileSidebar = () => {
     window.dispatchEvent(new CustomEvent('toggle-sidebar'));
@@ -164,46 +209,185 @@ export const Header = ({
   return (
     <>
       {/* Mobile Compact Frosted Glass Header */}
-      <header className="md:hidden h-14 border-b border-white/75 bg-white/75 backdrop-blur-xl px-4 flex items-center justify-between sticky top-0 z-30 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.06)]">
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={toggleMobileSidebar}
-            aria-label="Toggle navigation menu"
-            className="p-2 rounded-xl text-[#64748B] hover:text-[#262626] hover:bg-white/70 transition cursor-pointer"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-          <BrandLogo size="sm" />
+      <header className="md:hidden border-b border-white/75 dark:border-[#30363D] bg-white/75 dark:bg-[#161B22]/85 backdrop-blur-xl sticky top-0 z-30 shadow-[0_4px_16px_-4px_rgba(15,23,42,0.06)]">
+        <div className="h-14 px-3 sm:px-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={toggleMobileSidebar}
+              aria-label="Toggle navigation menu"
+              className="w-10 h-10 inline-flex items-center justify-center rounded-xl text-[#64748B] hover:text-[#262626] hover:bg-white/70 transition cursor-pointer shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <Link to="/dashboard" className="min-w-0 flex items-center" aria-label="PrepNest Dashboard">
+              <span className="min-[380px]:hidden">
+                <BrandLogo iconOnly size="sm" />
+              </span>
+              <span className="hidden min-[380px]:inline-flex">
+                <BrandLogo size="sm" />
+              </span>
+            </Link>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileDropdownOpen(false);
+                setMobileSearchOpen((o) => !o);
+              }}
+              aria-label={mobileSearchOpen ? 'Close search' : 'Search problems and companies'}
+              aria-expanded={mobileSearchOpen}
+              className="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-white/70 border border-[#E5E7EB]/80 text-[#64748B] hover:text-[#FFA116] transition cursor-pointer"
+            >
+              {mobileSearchOpen ? <X className="w-4 h-4" /> : <Search className="w-4 h-4" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={isDark ? 'Light mode' : 'Dark mode'}
+              className="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-white/70 border border-[#E5E7EB]/80 text-[#64748B] hover:text-[#FFA116] transition cursor-pointer"
+            >
+              {isDark ? <Sun className="w-4 h-4 text-[#FFA116]" /> : <Moon className="w-4 h-4" />}
+            </button>
+
+            <div className="hidden min-[360px]:flex items-center gap-1 bg-[#FFF8EE]/90 border border-[#FFA116]/30 text-[#FFA116] px-2 py-1 rounded-full text-[11px] font-bold">
+              <Flame className="w-3 h-3 fill-[#FFA116] text-[#FFA116]" />
+              <span>{headerStats.streak !== null ? `${headerStats.streak}d` : '—'}</span>
+            </div>
+
+            <div className="relative" ref={mobileDropdownRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileSearchOpen(false);
+                  setMobileDropdownOpen((o) => !o);
+                }}
+                aria-label="Open account menu"
+                aria-expanded={mobileDropdownOpen}
+                className="w-10 h-10 inline-flex items-center justify-center rounded-full cursor-pointer"
+              >
+                <UserAvatar
+                  src={user?.avatar_url}
+                  name={displayName}
+                  size="custom"
+                  className="w-8 h-8 text-xs shadow-sm ring-1 ring-[#E5E7EB]/80"
+                />
+              </button>
+
+              <AnimatePresence>
+                {mobileDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                    transition={{ duration: 0.15, ease: SMOOTH_EASE }}
+                    className="absolute right-0 mt-2 w-[min(17rem,calc(100vw-1.5rem))] bg-white/95 dark:bg-[#161B22]/95 backdrop-blur-2xl border border-white/85 dark:border-[#30363D] ring-1 ring-[#E5E7EB]/80 dark:ring-[#30363D] rounded-xl shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18)] py-1.5 z-50"
+                  >
+                    <div className="px-3.5 py-2.5 border-b border-[#E5E7EB]/60 flex items-center gap-2.5">
+                      <UserAvatar
+                        src={user?.avatar_url}
+                        name={displayName}
+                        size="sm"
+                        className="shadow-sm"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-[#262626] truncate">{displayName}</p>
+                        <p className="text-[11px] text-[#64748B] truncate">
+                          {user?.email || 'Logged In'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="px-3.5 py-2 border-b border-[#E5E7EB]/60 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="inline-flex items-center gap-1 font-bold text-[#FFA116]">
+                        <Flame className="w-3.5 h-3.5 fill-[#FFA116] text-[#FFA116]" />
+                        {headerStats.streak !== null ? `${headerStats.streak}d` : '—'}
+                      </span>
+                      <span className="inline-flex items-center gap-1 font-semibold text-[#262626]">
+                        <Sparkles className="w-3.5 h-3.5 text-[#FFA116]" />
+                        {headerStats.credits ?? user?.credits ?? '—'} Credits
+                      </span>
+                      <span className="inline-flex items-center gap-1 font-bold text-[#16A34A] ml-auto">
+                        <Zap className="w-3 h-3 text-[#16A34A]" />
+                        {headerStats.plan || user?.plan || 'Free'}
+                      </span>
+                    </div>
+
+                    <Link
+                      to="/dashboard"
+                      onClick={() => setMobileDropdownOpen(false)}
+                      className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-[#64748B] hover:text-[#262626] hover:bg-white/80 transition min-h-[44px]"
+                    >
+                      <LayoutDashboard className="w-4 h-4" />
+                      <span>Dashboard</span>
+                    </Link>
+                    <Link
+                      to="/settings"
+                      onClick={() => setMobileDropdownOpen(false)}
+                      className="flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-[#64748B] hover:text-[#262626] hover:bg-white/80 transition min-h-[44px]"
+                    >
+                      <Settings className="w-4 h-4" />
+                      <span>Settings &amp; Profile</span>
+                    </Link>
+                    <div className="my-1 border-t border-[#E5E7EB]/60" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileDropdownOpen(false);
+                        navigate('/landing', { replace: true });
+                        logout();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs text-[#DC2626] hover:bg-[#FEF2F2]/90 transition text-left cursor-pointer min-h-[44px]"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Sign Out</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={isDark ? 'Light mode' : 'Dark mode'}
-            className="p-1.5 rounded-lg bg-white/70 border border-[#E5E7EB]/80 text-[#64748B] hover:text-[#FFA116] transition cursor-pointer"
-          >
-            {isDark ? <Sun className="w-4 h-4 text-[#FFA116]" /> : <Moon className="w-4 h-4" />}
-          </button>
-          <div className="flex items-center gap-1 bg-[#FFF8EE]/90 border border-[#FFA116]/30 text-[#FFA116] px-2 py-0.5 rounded-full text-[11px] font-bold">
-            <Flame className="w-3 h-3 fill-[#FFA116] text-[#FFA116]" />
-            <span>{headerStats.streak !== null ? `${headerStats.streak}d` : '—'}</span>
-          </div>
-          <Link
-            to="/settings"
-            aria-label="Account Settings"
-            className="inline-flex items-center justify-center rounded-full"
-          >
-            <UserAvatar
-              src={user?.avatar_url}
-              name={displayName}
-              size="custom"
-              className="w-7 h-7 text-xs shadow-sm"
-            />
-          </Link>
-        </div>
+        {/* Expandable Mobile Search Bar */}
+        <AnimatePresence initial={false}>
+          {mobileSearchOpen && (
+            <motion.form
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.18, ease: SMOOTH_EASE }}
+              onSubmit={handleSearchSubmit}
+              className="overflow-hidden border-t border-[#E5E7EB]/60 px-3 py-2.5"
+            >
+              <div className="relative flex items-center gap-2">
+                <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  ref={mobileSearchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search problems, companies, topics..."
+                  className="w-full bg-white/80 border border-[#E5E7EB]/80 focus:border-[#FFA116] text-xs text-[#262626] placeholder-[#94A3B8] pl-9 pr-9 py-2.5 rounded-xl outline-none transition"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    aria-label="Clear search"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#94A3B8] hover:text-[#262626] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
       </header>
 
       {/* Desktop Floating Frosted Glass Navbar + Stationary Control Pill */}
@@ -301,7 +485,7 @@ export const Header = ({
                 </div>
 
                 {/* User Dropdown Trigger */}
-                <div className="relative">
+                <div className="relative" ref={desktopDropdownRef}>
                   <button
                     type="button"
                     onClick={() => setDropdownOpen((o) => !o)}

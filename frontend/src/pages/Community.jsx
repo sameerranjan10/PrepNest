@@ -479,7 +479,7 @@ export default function CommunityPage() {
 
               </div>
 
-              <div className="grid grid-cols-2 gap-3 min-w-[240px]">
+              <div className="grid grid-cols-2 gap-3 w-full sm:w-auto sm:min-w-[240px]">
 
                 <MiniStat
                   icon={Users}
@@ -1776,22 +1776,23 @@ function MentorProfileModal({
   onMentorship,
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-[#262626]/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-[#262626]/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
 
-      <div className="w-full max-w-lg bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl shadow-xl animate-in fade-in zoom-in-95 duration-150">
 
         <div className="h-24 bg-[#FFF8EE] border-b border-[#FFA116]/20 relative">
 
           <button
             onClick={onClose}
-            className="absolute right-3.5 top-3.5 w-8 h-8 rounded-lg bg-white/80 border border-[#E5E7EB] flex items-center justify-center text-[#64748B] hover:text-[#262626] transition"
+            aria-label="Close mentor profile"
+            className="absolute right-3 top-3 w-9 h-9 rounded-lg bg-white/80 border border-[#E5E7EB] flex items-center justify-center text-[#64748B] hover:text-[#262626] transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
 
         </div>
 
-        <div className="px-6 pb-6">
+        <div className="px-4 sm:px-6 pb-6">
 
           <div className="-mt-10 flex items-end justify-between">
 
@@ -2306,9 +2307,9 @@ function Modal({
   onClose,
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-[#262626]/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-[#262626]/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
 
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl shadow-xl animate-in fade-in zoom-in-95 duration-150">
+      <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-[#FFFFFF] border border-[#E5E7EB] rounded-2xl shadow-xl animate-in fade-in zoom-in-95 duration-150">
 
         <div className="sticky top-0 z-10 flex items-center justify-between p-4 bg-[#FFFFFF] border-b border-[#E5E7EB]">
 
@@ -2318,14 +2319,15 @@ function Modal({
 
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-md bg-[#F7F8FA] border border-[#E5E7EB] flex items-center justify-center text-[#64748B] hover:text-[#262626] transition"
+            aria-label="Close modal"
+            className="w-9 h-9 rounded-lg bg-[#F7F8FA] border border-[#E5E7EB] flex items-center justify-center text-[#64748B] hover:text-[#262626] transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
 
         </div>
 
-        <div className="p-5">
+        <div className="p-4 sm:p-5">
           {children}
         </div>
 

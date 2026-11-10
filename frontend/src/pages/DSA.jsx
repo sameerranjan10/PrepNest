@@ -292,7 +292,7 @@ export default function DSAPage() {
             {/* Streamlined Single-Row Search & Unified Filters Toolbar */}
             <div className="p-3.5 sm:px-4 border-b border-[var(--border)] space-y-2.5">
               <div className="flex flex-wrap items-center gap-2.5">
-                <div className="flex-1 min-w-[220px]">
+                <div className="w-full sm:flex-1 sm:min-w-[220px]">
                   <ProblemSearch
                     value={search}
                     onChange={handleSearchInputChange}

@@ -272,7 +272,7 @@ export default function AIAssistantPage() {
     <div className="flex min-h-screen bg-[#F7F8FA] text-[#262626] font-sans">
       <Sidebar activeRoute="ai-assistant" />
 
-      <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col h-[100dvh] overflow-hidden">
         <Header
           defaultCollapsed
           onTopBarChange={setIsTopBarCollapsed}

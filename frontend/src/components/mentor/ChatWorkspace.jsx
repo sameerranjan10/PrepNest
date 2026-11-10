@@ -75,7 +75,7 @@ export function ChatWorkspace({
         initial={{ opacity: 0, y: -12, filter: 'blur(8px)' }}
         animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
         transition={{ duration: 0.42, ease: BLUR_DROP_EASE }}
-        className={`mx-4 sm:mx-6 lg:mx-8 mt-2.5 min-h-[52px] px-3.5 sm:px-4 py-2 rounded-2xl bg-white/50 backdrop-blur-2xl backdrop-saturate-150 border border-white/80 ring-1 ring-[#E5E7EB]/65 shadow-[0_10px_30px_-8px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.95)] flex flex-wrap items-center justify-between gap-2 shrink-0 ${
+        className={`mx-3 sm:mx-6 lg:mx-8 mt-2.5 min-h-[52px] px-3 sm:px-4 py-2 rounded-2xl bg-white/50 backdrop-blur-2xl backdrop-saturate-150 border border-white/80 ring-1 ring-[#E5E7EB]/65 shadow-[0_10px_30px_-8px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.95)] flex flex-wrap items-center justify-between gap-2 shrink-0 ${
           isTopBarCollapsed ? 'md:pr-[124px] lg:pr-[132px]' : ''
         }`}
       >
