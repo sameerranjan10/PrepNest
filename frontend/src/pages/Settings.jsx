@@ -1,254 +1,326 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
+import { BlurDrop } from '@/components/ui/BlurDrop';
+import { UserAvatar } from '@/components/UserAvatar';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { AvatarCropModal } from '@/components/settings/AvatarCropModal';
+import {
+  CodingProfilesSection,
+  SocialPortfolioSection,
+} from '@/components/settings/CodingAndSocialSections';
+import {
+  PreparationGoalsSection,
+  SecuritySection,
+  AccountPreferencesSection,
+} from '@/components/settings/GoalsSecurityPrefsSections';
+import {
+  SUGGESTED_SKILLS,
+  SUGGESTED_COMPANIES,
+  SUGGESTED_ROLES,
+  buildFormStateFromUser,
+  buildPayloadFromForm,
+  calculateProfileCompletion,
+} from '@/components/settings/settingsConfig';
 import {
   User,
   GraduationCap,
   Code2,
   Share2,
-  Sliders,
+  Target,
   ShieldCheck,
+  Sliders,
   Save,
   CheckCircle2,
   AlertCircle,
-  ExternalLink,
-  Sparkles,
-  Trophy,
-  Flame,
-  Award,
-  Building2,
-  BookOpen,
+  Camera,
+  Upload,
+  Trash2,
   Mail,
   Phone,
   MapPin,
-  FileText,
-  KeyRound,
-  Trash2,
+  Briefcase,
+  Building2,
   Plus,
-  Zap,
-  Globe,
-  Terminal,
-  Cpu
+  X,
+  Pencil,
+  Check,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 
-const SUGGESTED_SKILLS = [
-  'Data Structures & Algorithms',
-  'Python',
-  'Java',
-  'C++',
-  'JavaScript',
-  'TypeScript',
-  'React',
-  'Next.js',
-  'Node.js',
-  'Express',
-  'PostgreSQL',
-  'MongoDB',
-  'System Design',
-  'Docker',
-  'Kubernetes',
-  'AWS',
-  'Git & GitHub',
-  'SQL',
-  'Machine Learning',
-  'Tailwind CSS'
-];
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+const ALLOWED_EXT_RE = /\.(jpg|jpeg|png|webp)$/i;
 
-const SUGGESTED_COMPANIES = [
-  'Google',
-  'Microsoft',
-  'Amazon',
-  'Meta',
-  'Apple',
-  'Uber',
-  'Atlassian',
-  'Goldman Sachs',
-  'Netflix',
-  'Adobe',
-  'Salesforce',
-  'Oracle',
-  'Flipkart',
-  'Swiggy',
-  'Zomato',
-  'Cisco'
+const NAV_TABS = [
+  { id: 'personal', label: 'Personal & Career', icon: User },
+  { id: 'academic', label: 'Academic Details', icon: GraduationCap },
+  { id: 'platforms', label: 'Coding Profiles', icon: Code2 },
+  { id: 'links', label: 'Social & Portfolio', icon: Share2 },
+  { id: 'preferences', label: 'Preparation Goals', icon: Target },
+  { id: 'security', label: 'Security', icon: ShieldCheck },
+  { id: 'account', label: 'Account Preferences', icon: Sliders },
 ];
 
 export default function SettingsPage() {
-  const { user, updateProfile, changePassword } = useAuth();
+  const { user, logout, updateProfile, changePassword, uploadAvatar, removeAvatar } = useAuth();
+  const { isDark, setTheme } = useTheme();
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState('personal');
-  const [isSaving, setIsSaving] = useState(false);
-  const [statusMessage, setStatusMessage] = useState(null); // { type: 'success' | 'error', text: string }
+  const [formData, setFormData] = useState(() => buildFormStateFromUser(user));
+  const [savedSnapshotJson, setSavedSnapshotJson] = useState(() =>
+    JSON.stringify(buildPayloadFromForm(buildFormStateFromUser(user)))
+  );
 
-  // Form State
-  const [formData, setFormData] = useState({
-    // Personal
-    full_name: '',
-    email: '',
-    phone: '',
-    location: '',
-    bio: '',
-    target_role: 'Software Development Engineer (SDE-1)',
-    target_companies: ['Google', 'Microsoft', 'Amazon'],
-    skills: ['Data Structures & Algorithms', 'Python', 'React', 'SQL'],
-    
-    // Academic
-    college: '',
-    degree: 'B.Tech / B.E. Computer Science',
-    grad_year: 2026,
-    current_semester: 'Semester 6',
-    cgpa: '',
-    tenth_percentage: '',
-    twelfth_percentage: '',
-    
-    // Coding Platforms
-    leetcode_username: '',
-    hackerrank_username: '',
-    codechef_username: '',
-    codeforces_username: '',
-    gfg_username: '',
-    
-    // Social / Portfolio
-    github_url: '',
-    linkedin_url: '',
-    portfolio_url: '',
-    resume_url: '',
-    
-    // Preferences
-    preferred_language: 'Python',
-    daily_dsa_goal: 2,
-    daily_aptitude_goal: 1,
-    prep_level: 'Intermediate',
-    email_notifications: true
+  const [isSaving, setIsSaving] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
+
+  // Avatar upload / crop / remove state
+  const fileInputRef = useRef(null);
+  const [avatarError, setAvatarError] = useState(null);
+  const [isAvatarBusy, setIsAvatarBusy] = useState(false);
+  const [isDragOverAvatar, setIsDragOverAvatar] = useState(false);
+  const [cropDraft, setCropDraft] = useState({
+    isOpen: false,
+    imageSrc: null,
+    fileName: '',
+    fileSize: 0,
   });
 
-  // Password State
+  // Password state
   const [passwordData, setPasswordData] = useState({
     current_password: '',
     new_password: '',
-    confirm_password: ''
+    confirm_password: '',
   });
   const [passwordStatus, setPasswordStatus] = useState(null);
   const [isChangingPass, setIsChangingPass] = useState(false);
 
-  // Custom Tag Inputs
-  const [newSkillInput, setNewSkillInput] = useState('');
+  // Tag & inline skill edit states
   const [newCompanyInput, setNewCompanyInput] = useState('');
+  const [newSkillInput, setNewSkillInput] = useState('');
+  const [editingSkillIdx, setEditingSkillIdx] = useState(null);
+  const [editingSkillValue, setEditingSkillValue] = useState('');
 
-  // Prepopulate from user context
+  // Unsaved navigation confirmation modal
+  const [pendingNavHref, setPendingNavHref] = useState(null);
+
+  // Synchronize form with backend user whenever user loads or updates (unless dirty)
+  const currentPayloadJson = useMemo(
+    () => JSON.stringify(buildPayloadFromForm(formData)),
+    [formData]
+  );
+  const hasUnsavedChanges = currentPayloadJson !== savedSnapshotJson;
+
   useEffect(() => {
-    if (user) {
-      // Parse JSON or comma-separated lists if needed
-      let userSkills = ['Data Structures & Algorithms', 'Python', 'React', 'SQL'];
-      if (user.skills) {
-        try {
-          userSkills = typeof user.skills === 'string' && user.skills.startsWith('[') 
-            ? JSON.parse(user.skills) 
-            : user.skills.split(',').map(s => s.trim()).filter(Boolean);
-        } catch {
-          userSkills = [user.skills];
-        }
+    if (!user) return;
+    const syncedForm = buildFormStateFromUser(user);
+    const syncedJson = JSON.stringify(buildPayloadFromForm(syncedForm));
+    setFormData((prev) => {
+      const prevJson = JSON.stringify(buildPayloadFromForm(prev));
+      if (prevJson === savedSnapshotJson) {
+        return syncedForm;
       }
+      return prev;
+    });
+    setSavedSnapshotJson(syncedJson);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-      let userCompanies = ['Google', 'Microsoft', 'Amazon'];
-      if (user.target_companies) {
-        try {
-          userCompanies = typeof user.target_companies === 'string' && user.target_companies.startsWith('[')
-            ? JSON.parse(user.target_companies)
-            : user.target_companies.split(',').map(s => s.trim()).filter(Boolean);
-        } catch {
-          userCompanies = [user.target_companies];
-        }
+  // Warn on tab close / reload if there are unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (!hasUnsavedChanges) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Intercept in-app link clicks when unsaved changes exist (compatible with BrowserRouter)
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const handleAnchorClick = (e) => {
+      const anchor = e.target.closest('a[href]');
+      if (!anchor) return;
+      if (anchor.target === '_blank' || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const href = anchor.getAttribute('href');
+      if (!href || !href.startsWith('/') || href === '/settings') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPendingNavHref(href);
+    };
+    document.addEventListener('click', handleAnchorClick, true);
+    return () => document.removeEventListener('click', handleAnchorClick, true);
+  }, [hasUnsavedChanges]);
+
+  // Revoke temporary object URL when crop modal closes
+  useEffect(() => {
+    return () => {
+      if (cropDraft.imageSrc) {
+        URL.revokeObjectURL(cropDraft.imageSrc);
       }
+    };
+  }, [cropDraft.imageSrc]);
 
-      setFormData({
-        full_name: user.full_name || user.name || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        location: user.location || '',
-        bio: user.bio || '',
-        target_role: user.target_role || 'Software Development Engineer (SDE-1)',
-        target_companies: userCompanies,
-        skills: userSkills,
-        college: user.college || '',
-        degree: user.degree || 'B.Tech / B.E. Computer Science',
-        grad_year: user.grad_year || 2026,
-        current_semester: user.current_semester || 'Semester 6',
-        cgpa: user.cgpa || '',
-        tenth_percentage: user.tenth_percentage || '',
-        twelfth_percentage: user.twelfth_percentage || '',
-        leetcode_username: user.leetcode_username || '',
-        hackerrank_username: user.hackerrank_username || '',
-        codechef_username: user.codechef_username || '',
-        codeforces_username: user.codeforces_username || '',
-        gfg_username: user.gfg_username || '',
-        github_url: user.github_url || '',
-        linkedin_url: user.linkedin_url || '',
-        portfolio_url: user.portfolio_url || '',
-        resume_url: user.resume_url || '',
-        preferred_language: user.preferred_language || 'Python',
-        daily_dsa_goal: user.daily_dsa_goal ?? 2,
-        daily_aptitude_goal: user.daily_aptitude_goal ?? 1,
-        prep_level: user.prep_level || 'Intermediate',
-        email_notifications: user.email_notifications ?? true
-      });
-    }
-  }, [user]);
+  const handleFieldChange = useCallback((field, value) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
 
-  // Calculate Profile Completion
-  const calculateCompletion = () => {
-    let score = 0;
-    const checks = [
-      formData.full_name,
-      formData.phone,
-      formData.bio,
-      formData.college,
-      formData.degree,
-      formData.cgpa,
-      formData.tenth_percentage || formData.twelfth_percentage,
-      formData.leetcode_username,
-      formData.hackerrank_username,
-      formData.github_url,
-      formData.linkedin_url,
-      formData.skills.length > 0,
-      formData.target_companies.length > 0
-    ];
-
-    const completed = checks.filter(Boolean).length;
-    score = Math.round((completed / checks.length) * 100);
-    return score;
+  const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    handleFieldChange(name, type === 'checkbox' ? checked : value);
   };
 
-  const completionScore = calculateCompletion();
+  // Profile Picture Validation + Preview/Crop Trigger
+  const processSelectedAvatarFile = (file) => {
+    setAvatarError(null);
+    if (!file) return;
 
-  // Handlers
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    const validMime = file.type ? ALLOWED_MIME_TYPES.has(file.type.toLowerCase()) : false;
+    const validExt = ALLOWED_EXT_RE.test(file.name || '');
+
+    if (!validMime && !validExt) {
+      setAvatarError('Invalid file type. Please choose a JPG, JPEG, PNG, or WebP image.');
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_BYTES) {
+      setAvatarError('Image exceeds 5 MB limit. Please upload a smaller photo.');
+      return;
+    }
+
+    if (file.size === 0) {
+      setAvatarError('Selected image file is empty.');
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setCropDraft({
+      isOpen: true,
+      imageSrc: previewUrl,
+      fileName: file.name,
+      fileSize: file.size,
+    });
+  };
+
+  const handleAvatarFileInput = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    processSelectedAvatarFile(file);
+  };
+
+  const handleConfirmAvatarCrop = async (croppedBlob, outName) => {
+    setIsAvatarBusy(true);
+    setAvatarError(null);
+    const res = await uploadAvatar(croppedBlob, outName);
+    setIsAvatarBusy(false);
+
+    if (res.success) {
+      if (cropDraft.imageSrc) URL.revokeObjectURL(cropDraft.imageSrc);
+      setCropDraft({ isOpen: false, imageSrc: null, fileName: '', fileSize: 0 });
+      setStatusMessage({
+        type: 'success',
+        text: 'Profile picture updated across PrepNest!',
+      });
+    } else {
+      setAvatarError(res.error || 'Could not save profile picture.');
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    setIsAvatarBusy(true);
+    setAvatarError(null);
+    const res = await removeAvatar();
+    setIsAvatarBusy(false);
+
+    if (res.success) {
+      setStatusMessage({
+        type: 'success',
+        text: 'Profile picture removed. Showing initials avatar.',
+      });
+    } else {
+      setAvatarError(res.error || 'Could not remove profile picture.');
+    }
+  };
+
+  // Company & Skill Tag Helpers
+  const handleAddCompany = (companyToAdd) => {
+    const comp = (companyToAdd ?? newCompanyInput).trim();
+    if (!comp) return;
+    if (!formData.target_companies.some((c) => c.toLowerCase() === comp.toLowerCase())) {
+      setFormData((prev) => ({
+        ...prev,
+        target_companies: [...prev.target_companies, comp],
+      }));
+    }
+    if (companyToAdd === undefined) setNewCompanyInput('');
+  };
+
+  const handleRemoveCompany = (companyToRemove) => {
+    setFormData((prev) => ({
+      ...prev,
+      target_companies: prev.target_companies.filter((c) => c !== companyToRemove),
+    }));
   };
 
   const handleAddSkill = (skillToAdd) => {
-    const val = (skillToAdd || newSkillInput).trim();
-    if (val && !formData.skills.includes(val)) {
-      setFormData(prev => ({ ...prev, skills: [...prev.skills, val] }));
-      setNewSkillInput('');
+    const skill = (skillToAdd ?? newSkillInput).trim();
+    if (!skill) return;
+    if (!formData.skills.some((s) => s.toLowerCase() === skill.toLowerCase())) {
+      setFormData((prev) => ({
+        ...prev,
+        skills: [...prev.skills, skill],
+      }));
     }
+    if (skillToAdd === undefined) setNewSkillInput('');
   };
 
   const handleRemoveSkill = (skillToRemove) => {
-    setFormData(prev => ({ ...prev, skills: prev.skills.filter(s => s !== skillToRemove) }));
+    setEditingSkillIdx(null);
+    setFormData((prev) => ({
+      ...prev,
+      skills: prev.skills.filter((s) => s !== skillToRemove),
+    }));
   };
 
-  const handleAddCompany = (compToAdd) => {
-    const val = (compToAdd || newCompanyInput).trim();
-    if (val && !formData.target_companies.includes(val)) {
-      setFormData(prev => ({ ...prev, target_companies: [...prev.target_companies, val] }));
-      setNewCompanyInput('');
+  const handleCommitSkillEdit = (idx) => {
+    const nextVal = editingSkillValue.trim();
+    if (!nextVal) {
+      setEditingSkillIdx(null);
+      return;
     }
+    setFormData((prev) => {
+      const copy = [...prev.skills];
+      if (
+        copy.some(
+          (item, i) => i !== idx && item.toLowerCase() === nextVal.toLowerCase()
+        )
+      ) {
+        return prev;
+      }
+      copy[idx] = nextVal;
+      return { ...prev, skills: copy };
+    });
+    setEditingSkillIdx(null);
+    setEditingSkillValue('');
   };
 
-  const handleRemoveCompany = (compToRemove) => {
-    setFormData(prev => ({ ...prev, target_companies: prev.target_companies.filter(c => c !== compToRemove) }));
+  const handleDiscardChanges = () => {
+    const resetForm = buildFormStateFromUser(user);
+    setFormData(resetForm);
+    setSavedSnapshotJson(JSON.stringify(buildPayloadFromForm(resetForm)));
+    setEditingSkillIdx(null);
+    setStatusMessage(null);
   };
 
   const handleSaveProfile = async (e) => {
@@ -257,32 +329,31 @@ export default function SettingsPage() {
     setStatusMessage(null);
 
     try {
-      const payload = {
-        ...formData,
-        target_companies: JSON.stringify(formData.target_companies),
-        skills: JSON.stringify(formData.skills),
-        grad_year: Number(formData.grad_year) || 2026,
-        daily_dsa_goal: Number(formData.daily_dsa_goal) || 2,
-        daily_aptitude_goal: Number(formData.daily_aptitude_goal) || 1
-      };
-
-      const result = await updateProfile(payload);
-      if (result.success) {
+      const payload = buildPayloadFromForm(formData);
+      const res = await updateProfile(payload);
+      if (res.success) {
+        const updatedForm = buildFormStateFromUser(res.user);
+        setFormData(updatedForm);
+        setSavedSnapshotJson(JSON.stringify(buildPayloadFromForm(updatedForm)));
         setStatusMessage({
           type: 'success',
-          text: result.warning 
-            ? 'Profile saved locally! (Backend server offline)' 
-            : 'Profile and Academic settings updated successfully!'
+          text: 'All changes saved to your PrepNest profile.',
         });
+        return true;
       }
+      setStatusMessage({
+        type: 'error',
+        text: res.warning || 'Could not save changes.',
+      });
+      return false;
     } catch (err) {
       setStatusMessage({
         type: 'error',
-        text: err.message || 'Failed to save changes'
+        text: err.message || 'Failed to save changes.',
       });
+      return false;
     } finally {
       setIsSaving(false);
-      setTimeout(() => setStatusMessage(null), 5000);
     }
   };
 
@@ -291,1042 +362,1047 @@ export default function SettingsPage() {
     setPasswordStatus(null);
 
     if (passwordData.new_password !== passwordData.confirm_password) {
-      setPasswordStatus({ type: 'error', text: 'New passwords do not match' });
+      setPasswordStatus({ type: 'error', text: 'New passwords do not match.' });
       return;
     }
 
     if (passwordData.new_password.length < 6) {
-      setPasswordStatus({ type: 'error', text: 'Password must be at least 6 characters' });
+      setPasswordStatus({
+        type: 'error',
+        text: 'New password must be at least 6 characters long.',
+      });
       return;
     }
 
     setIsChangingPass(true);
     try {
       await changePassword(passwordData.current_password, passwordData.new_password);
-      setPasswordStatus({ type: 'success', text: 'Password changed successfully!' });
+      setPasswordStatus({ type: 'success', text: 'Password updated successfully!' });
       setPasswordData({ current_password: '', new_password: '', confirm_password: '' });
     } catch (err) {
-      setPasswordStatus({ type: 'error', text: err.message || 'Failed to change password' });
+      setPasswordStatus({ type: 'error', text: err.message || 'Failed to update password.' });
     } finally {
       setIsChangingPass(false);
-      setTimeout(() => setPasswordStatus(null), 5000);
     }
   };
 
-  const getInitials = (name) => {
-    if (!name) return 'ST';
-    const parts = name.trim().split(' ').filter(Boolean);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  const handleSignOut = () => {
+    logout();
+    navigate('/login');
   };
 
-  const tabs = [
-    { id: 'personal', label: 'Personal Info', icon: User, desc: 'Name, bio & target roles' },
-    { id: 'academic', label: 'Academics', icon: GraduationCap, desc: 'College, GPA & batches' },
-    { id: 'coding', label: 'Coding Platforms', icon: Code2, desc: 'LeetCode & HackerRank' },
-    { id: 'social', label: 'Social & Links', icon: Share2, desc: 'GitHub, LinkedIn & Resume' },
-    { id: 'preferences', label: 'Prep Goals & AI', icon: Sliders, desc: 'Daily targets & language' },
-    { id: 'security', label: 'Account & Security', icon: ShieldCheck, desc: 'Password & subscription' },
-  ];
+  const completion = useMemo(
+    () => calculateProfileCompletion(formData, user),
+    [formData, user]
+  );
+
+  const displayName = formData.full_name || user?.full_name || user?.name || 'Student Account';
 
   return (
-    <div className="flex min-h-screen bg-slate-950 text-slate-100 font-sans">
+    <div className="flex min-h-screen bg-[#F8FAFC] dark:bg-[#0D1117] text-[#1E293B] dark:text-[#E6EDF3] font-sans">
       <Sidebar activeRoute="settings" />
-
       <div className="flex-1 flex flex-col min-w-0">
-        <Header />
+        <Header defaultCollapsed />
 
-        <main className="p-6 md:p-8 space-y-8 overflow-y-auto max-w-7xl w-full mx-auto">
-          
-          {/* Header Banner & Profile Summary */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-950 via-slate-900 to-purple-950 border border-slate-800/80 p-6 md:p-8 shadow-2xl">
-            <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+        {/* Hidden Shared Avatar File Input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          onChange={handleAvatarFileInput}
+          className="hidden"
+        />
 
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-              
-              {/* Profile Card & Avatar */}
-              <div className="flex items-center gap-5">
-                <div className="relative">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 p-0.5 shadow-xl shadow-indigo-500/20">
-                    <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center font-extrabold text-2xl text-white">
-                      {getInitials(formData.full_name || user?.full_name)}
-                    </div>
-                  </div>
-                  <span className="absolute -bottom-1 -right-1 p-1 bg-emerald-500 rounded-full border-2 border-slate-950" title="Profile Active" />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <h1 className="text-2xl font-bold text-white tracking-tight">
-                      {formData.full_name || 'Student Profile'}
-                    </h1>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" /> {user?.plan || 'Pro'} Member
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-400 flex items-center gap-2">
-                    <Mail className="w-3.5 h-3.5 text-slate-500" /> {formData.email || user?.email || 'student@prepnest.ai'}
-                    {formData.location && (
-                      <>
-                        <span className="text-slate-600">•</span>
-                        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-slate-500" /> {formData.location}</span>
-                      </>
-                    )}
-                  </p>
-                  <p className="text-xs text-indigo-300 font-medium">
-                    Targeting: <span className="text-white font-semibold">{formData.target_role}</span>
-                  </p>
-                </div>
-              </div>
-
-              {/* Placement Readiness / Profile Completion Bar */}
-              <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-2xl p-4 md:p-5 w-full md:w-80 shadow-lg space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Trophy className="w-4 h-4 text-amber-400" /> Profile Strength
+        <BlurDrop as="main" className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-[1440px]">
+          {/* Page Header */}
+          <div className="bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] rounded-2xl p-5 sm:p-6 md:pr-[132px] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="accent" size="sm">
+                  Account Management
+                </Badge>
+                <Badge variant="neutral" size="sm">
+                  {user?.plan || 'Pro'} Plan
+                </Badge>
+                {hasUnsavedChanges && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#FFFBEB] dark:bg-[#D97706]/15 border border-[#F59E0B]/40 text-[11px] font-semibold text-[#D97706] dark:text-[#FFA116]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] animate-pulse" />
+                    Unsaved changes
                   </span>
-                  <span className="text-sm font-extrabold text-indigo-400">{completionScore}%</span>
-                </div>
-
-                {/* Progress track */}
-                <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-500 rounded-full"
-                    style={{ width: `${completionScore}%` }}
-                  />
-                </div>
-
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  {completionScore === 100 
-                    ? '🎉 Profile 100% complete! Ready for campus placement drives.'
-                    : 'Add your LeetCode, HackerRank & Academic CGPA for optimal AI recommendations.'}
-                </p>
+                )}
               </div>
-
+              <h1 className="text-xl sm:text-2xl font-bold text-[#1E293B] dark:text-[#E6EDF3] tracking-tight">
+                Settings &amp; Candidate Profile
+              </h1>
+              <p className="text-xs sm:text-sm text-[#64748B]">
+                Manage your profile identity, academic credentials, coding handles, preparation goals, and account security.
+              </p>
             </div>
+
+            {activeTab !== 'security' && (
+              <div className="flex items-center gap-2.5 shrink-0">
+                {hasUnsavedChanges && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleDiscardChanges}
+                    disabled={isSaving}
+                    icon={<RotateCcw className="w-3.5 h-3.5" />}
+                  >
+                    Discard
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  loading={isSaving}
+                  onClick={handleSaveProfile}
+                  icon={<Save className="w-3.5 h-3.5" />}
+                >
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            )}
           </div>
 
-          {/* Feedback Alert */}
+          {/* Save Status Banner */}
           {statusMessage && (
-            <div className={`p-4 rounded-2xl border flex items-center gap-3 transition-all animate-fadeIn ${
-              statusMessage.type === 'success' 
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-            }`}>
-              {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0" />
-              )}
-              <span className="text-sm font-medium">{statusMessage.text}</span>
+            <div
+              className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                statusMessage.type === 'success'
+                  ? 'bg-[#F0FDF4] dark:bg-[#16A34A]/15 border-[#16A34A]/30 text-[#16A34A] font-semibold'
+                  : 'bg-[#FEF2F2] dark:bg-[#F85149]/15 border-[#DC2626]/30 text-[#DC2626] font-semibold'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{statusMessage.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStatusMessage(null)}
+                className="p-0.5 rounded hover:bg-black/5 cursor-pointer"
+                aria-label="Dismiss notification"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 
-          {/* Settings Grid Layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Two-Column Settings Workspace */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* LEFT COLUMN: Profile Overview + 7-Category Navigation */}
+            <aside className="lg:col-span-4 xl:col-span-3 space-y-5">
+              {/* Dedicated Profile Overview Panel */}
+              <div className="bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col items-center text-center space-y-3">
+                  {/* Large Circular Avatar with Camera Overlay */}
+                  <div className="relative group">
+                    <UserAvatar
+                      src={user?.avatar_url}
+                      name={displayName}
+                      size="2xl"
+                      className="ring-4 ring-[#F8FAFC] dark:ring-[#0D1117] border-2 border-[#F59E0B] shadow-md"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isAvatarBusy}
+                      title={user?.avatar_url ? 'Change profile picture' : 'Upload profile picture'}
+                      aria-label={user?.avatar_url ? 'Change profile picture' : 'Upload profile picture'}
+                      className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#F59E0B] hover:bg-[#D97706] text-white border-2 border-white dark:border-[#161B22] flex items-center justify-center shadow-md transition cursor-pointer disabled:opacity-50"
+                    >
+                      <Camera className="w-4 h-4" />
+                    </button>
+                  </div>
 
-            {/* Left Column: Tab List */}
-            <div className="lg:col-span-4 space-y-2">
-              <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-3 space-y-1 shadow-lg sticky top-24">
-                <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  Settings Sections
+                  {/* Upload / Change / Remove Controls */}
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isAvatarBusy}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFF8EE] dark:bg-[#FFA116]/15 border border-[#F59E0B]/40 text-xs font-semibold text-[#D97706] dark:text-[#FFA116] hover:bg-[#F59E0B] hover:text-white transition cursor-pointer disabled:opacity-50"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{user?.avatar_url ? 'Change Photo' : 'Upload Photo'}</span>
+                    </button>
+
+                    {user?.avatar_url && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        disabled={isAvatarBusy}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D] text-xs font-medium text-[#64748B] hover:text-[#DC2626] hover:border-[#DC2626]/40 transition cursor-pointer disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-[#64748B]">
+                    JPG, JPEG, PNG or WebP • Max 5 MB
+                  </p>
+
+                  {avatarError && (
+                    <div className="w-full p-2.5 rounded-lg bg-[#FEF2F2] border border-[#DC2626]/30 text-[11px] text-[#DC2626] font-medium text-left">
+                      {avatarError}
+                    </div>
+                  )}
+
+                  {/* Identity Details */}
+                  <div className="w-full pt-1 space-y-1">
+                    <h2 className="text-base font-bold text-[#1E293B] dark:text-[#E6EDF3] truncate">
+                      {displayName}
+                    </h2>
+                    <p className="text-xs font-medium text-[#F59E0B] truncate">
+                      {formData.target_role || 'Target role not set'}
+                    </p>
+                    <p className="text-xs text-[#64748B] truncate">
+                      {formData.email || user?.email || 'No email on file'}
+                    </p>
+                  </div>
                 </div>
 
-                {tabs.map(tab => {
+                {/* Profile Completeness */}
+                <div className="pt-3.5 border-t border-[#E2E8F0] dark:border-[#30363D] space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-[#64748B]">Profile Completeness</span>
+                    <span
+                      className={`font-bold tabular-nums ${
+                        completion.percentage >= 80 ? 'text-[#16A34A]' : 'text-[#F59E0B]'
+                      }`}
+                    >
+                      {completion.percentage}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-[#E2E8F0] dark:bg-[#21262D] overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        completion.percentage >= 80 ? 'bg-[#16A34A]' : 'bg-[#F59E0B]'
+                      }`}
+                      style={{ width: `${completion.percentage}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-[#64748B]">
+                    {completion.completed} of {completion.total} key profile milestones completed
+                  </p>
+                </div>
+              </div>
+
+              {/* Settings Categories Navigation */}
+              <nav
+                aria-label="Settings sections"
+                className="bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] rounded-2xl p-2 shadow-sm space-y-1"
+              >
+                {NAV_TABS.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.id;
                   return (
                     <button
                       key={tab.id}
+                      type="button"
                       onClick={() => setActiveTab(tab.id)}
-                      className={`w-full text-left flex items-start gap-3.5 p-3 rounded-xl transition-all ${
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                         isActive
-                          ? 'bg-gradient-to-r from-indigo-600/90 to-purple-600/90 text-white font-semibold shadow-lg shadow-indigo-500/20'
-                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                          ? 'bg-[#FFF8EE] dark:bg-[#FFA116]/15 text-[#D97706] dark:text-[#FFA116] border border-[#F59E0B]/30 shadow-xs'
+                          : 'text-[#64748B] hover:text-[#1E293B] dark:hover:text-[#E6EDF3] hover:bg-[#F8FAFC] dark:hover:bg-[#21262D] border border-transparent'
                       }`}
                     >
-                      <div className={`p-2 rounded-lg ${isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium">{tab.label}</div>
-                        <div className={`text-[11px] truncate ${isActive ? 'text-indigo-100' : 'text-slate-500'}`}>
-                          {tab.desc}
-                        </div>
-                      </div>
+                      <span className="flex items-center gap-2.5">
+                        <Icon
+                          className={`w-4 h-4 ${
+                            isActive ? 'text-[#F59E0B]' : 'text-[#64748B]'
+                          }`}
+                        />
+                        <span>{tab.label}</span>
+                      </span>
+                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />}
                     </button>
                   );
                 })}
+              </nav>
+            </aside>
 
-                {/* Save All Shortcut */}
-                <div className="pt-4 mt-2 border-t border-slate-800/80 px-2">
-                  <button
-                    onClick={handleSaveProfile}
-                    disabled={isSaving}
-                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-sm font-bold shadow-lg shadow-indigo-500/25 transition disabled:opacity-50"
-                  >
-                    <Save className="w-4 h-4" />
-                    {isSaving ? 'Saving Changes...' : 'Save All Changes'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Tab Content Panels */}
-            <div className="lg:col-span-8 space-y-6">
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 1: PERSONAL INFORMATION */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'personal' && (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
-                  <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                      <User className="w-5 h-5 text-indigo-400" /> Personal Details & Aspirations
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Manage your profile identification, contact data, target job role, and dream companies.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Full Name</label>
-                      <input
-                        type="text"
-                        value={formData.full_name}
-                        onChange={(e) => handleInputChange('full_name', e.target.value)}
-                        placeholder="e.g. Alex Johnson"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Email Address (Read-only)</label>
-                      <input
-                        type="email"
-                        disabled
-                        value={formData.email}
-                        className="w-full bg-slate-950/60 border border-slate-800/80 rounded-xl px-4 py-2.5 text-sm text-slate-400 cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Phone Number</label>
-                      <div className="relative">
-                        <Phone className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                        <input
-                          type="tel"
-                          value={formData.phone}
-                          onChange={(e) => handleInputChange('phone', e.target.value)}
-                          placeholder="+91 98765 43210"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Location (City, Country)</label>
-                      <div className="relative">
-                        <MapPin className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                        <input
-                          type="text"
-                          value={formData.location}
-                          onChange={(e) => handleInputChange('location', e.target.value)}
-                          placeholder="e.g. Bengaluru, India"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Bio */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300">Bio / Professional Summary</label>
-                    <textarea
-                      rows={3}
-                      value={formData.bio}
-                      onChange={(e) => handleInputChange('bio', e.target.value)}
-                      placeholder="Passionate computer science student aspiring for SDE roles, skilled in DSA, React, and Python systems..."
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl p-3.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition resize-none"
-                    />
-                  </div>
-
-                  {/* Target Role */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300">Target Role / Career Goal</label>
-                    <select
-                      value={formData.target_role}
-                      onChange={(e) => handleInputChange('target_role', e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                    >
-                      <option value="Software Development Engineer (SDE-1)">Software Development Engineer (SDE-1)</option>
-                      <option value="Frontend Engineer">Frontend Engineer (React / Next.js)</option>
-                      <option value="Backend Engineer">Backend Engineer (Python / Java / Go)</option>
-                      <option value="Full Stack Developer">Full Stack Developer</option>
-                      <option value="Data Scientist & AI/ML Engineer">Data Scientist & AI/ML Engineer</option>
-                      <option value="DevOps & Cloud Engineer">DevOps & Cloud Engineer</option>
-                      <option value="Cybersecurity Analyst">Cybersecurity Analyst</option>
-                    </select>
-                  </div>
-
-                  {/* Target Companies */}
-                  <div className="space-y-3">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                      <Building2 className="w-4 h-4 text-purple-400" /> Target Dream Companies
-                    </label>
-
-                    {/* Selected Badges */}
-                    <div className="flex flex-wrap gap-2">
-                      {formData.target_companies.map((comp) => (
-                        <span 
-                          key={comp}
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/15 border border-purple-500/30 text-purple-300"
-                        >
-                          {comp}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveCompany(comp)}
-                            className="hover:text-rose-400 transition"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-
-                    {/* Add Custom Company */}
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newCompanyInput}
-                        onChange={(e) => setNewCompanyInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddCompany())}
-                        placeholder="Add company (e.g. Nvidia, Stripe)..."
-                        className="flex-1 bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-xl px-4 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleAddCompany()}
-                        className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition flex items-center gap-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add
-                      </button>
-                    </div>
-
-                    {/* Suggestions */}
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      <span className="text-[11px] text-slate-500 py-0.5">Suggestions:</span>
-                      {SUGGESTED_COMPANIES.filter(c => !formData.target_companies.includes(c)).slice(0, 6).map(c => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => handleAddCompany(c)}
-                          className="text-[11px] px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 hover:text-purple-300 hover:bg-purple-500/10 transition"
-                        >
-                          + {c}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Skills Tags */}
-                  <div className="space-y-3">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                      <Cpu className="w-4 h-4 text-indigo-400" /> Primary Skills & Tech Stack
-                    </label>
-
-                    <div className="flex flex-wrap gap-2">
-                      {formData.skills.map((skill) => (
-                        <span 
-                          key={skill}
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/15 border border-indigo-500/30 text-indigo-300"
-                        >
-                          {skill}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSkill(skill)}
-                            className="hover:text-rose-400 transition"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newSkillInput}
-                        onChange={(e) => setNewSkillInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSkill())}
-                        placeholder="Add skill (e.g. Redis, GraphQL)..."
-                        className="flex-1 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleAddSkill()}
-                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add
-                      </button>
-                    </div>
-
-                    {/* Suggestions */}
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      <span className="text-[11px] text-slate-500 py-0.5">Quick Add:</span>
-                      {SUGGESTED_SKILLS.filter(s => !formData.skills.includes(s)).slice(0, 6).map(s => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => handleAddSkill(s)}
-                          className="text-[11px] px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition"
-                        >
-                          + {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-slate-800">
-                    <button
-                      type="button"
-                      onClick={handleSaveProfile}
-                      disabled={isSaving}
-                      className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Personal Details'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 2: ACADEMICS & EDUCATION */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'academic' && (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
-                  <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                      <GraduationCap className="w-5 h-5 text-indigo-400" /> Academic & Educational Credentials
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Add your university, graduation batch, CGPA, and board results for company campus recruitment criteria.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div className="space-y-1.5 md:col-span-2">
-                      <label className="text-xs font-semibold text-slate-300">College / University Name</label>
-                      <input
-                        type="text"
-                        value={formData.college}
-                        onChange={(e) => handleInputChange('college', e.target.value)}
-                        placeholder="e.g. National Institute of Technology / IIT / Anna University"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Degree & Specialization</label>
-                      <input
-                        type="text"
-                        value={formData.degree}
-                        onChange={(e) => handleInputChange('degree', e.target.value)}
-                        placeholder="e.g. B.Tech Computer Science & Engineering"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Graduation Year / Batch</label>
-                      <select
-                        value={formData.grad_year}
-                        onChange={(e) => handleInputChange('grad_year', Number(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                      >
-                        <option value={2024}>2024 Batch</option>
-                        <option value={2025}>2025 Batch</option>
-                        <option value={2026}>2026 Batch</option>
-                        <option value={2027}>2027 Batch</option>
-                        <option value={2028}>2028 Batch</option>
-                        <option value={2029}>2029 Batch</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Current Semester / Year</label>
-                      <select
-                        value={formData.current_semester}
-                        onChange={(e) => handleInputChange('current_semester', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                      >
-                        <option value="Semester 1">Semester 1 (1st Year)</option>
-                        <option value="Semester 2">Semester 2 (1st Year)</option>
-                        <option value="Semester 3">Semester 3 (2nd Year)</option>
-                        <option value="Semester 4">Semester 4 (2nd Year)</option>
-                        <option value="Semester 5">Semester 5 (3rd Year)</option>
-                        <option value="Semester 6">Semester 6 (3rd Year)</option>
-                        <option value="Semester 7">Semester 7 (Final Year)</option>
-                        <option value="Semester 8">Semester 8 (Final Year)</option>
-                        <option value="Graduated">Graduated / Alumni</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">College CGPA / Grade (out of 10.0)</label>
-                      <input
-                        type="text"
-                        value={formData.cgpa}
-                        onChange={(e) => handleInputChange('cgpa', e.target.value)}
-                        placeholder="e.g. 8.75 or 85%"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Class 10th (Secondary) Percentage / CGPA</label>
-                      <input
-                        type="text"
-                        value={formData.tenth_percentage}
-                        onChange={(e) => handleInputChange('tenth_percentage', e.target.value)}
-                        placeholder="e.g. 92.4% or 9.6 CGPA"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Class 12th / Diploma Percentage</label>
-                      <input
-                        type="text"
-                        value={formData.twelfth_percentage}
-                        onChange={(e) => handleInputChange('twelfth_percentage', e.target.value)}
-                        placeholder="e.g. 89.2%"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Criteria Notice */}
-                  <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-start gap-3 text-xs text-indigo-300">
-                    <Sparkles className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
-                    <span>
-                      Many tier-1 companies (like Microsoft, Google, Goldman Sachs) require minimum 7.0+ CGPA and 60%+ in 10th/12th for campus shortlist eligibility. Keeping these updated helps PrepNest filter eligible opportunities for you.
-                    </span>
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-slate-800">
-                    <button
-                      type="button"
-                      onClick={handleSaveProfile}
-                      disabled={isSaving}
-                      className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Academic Details'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 3: CODING PLATFORMS (LeetCode, HackerRank, etc.) */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'coding' && (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
-                  <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                      <Code2 className="w-5 h-5 text-amber-400" /> Competitive Programming & Coding Profiles
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Link your LeetCode, HackerRank, CodeChef, and Codeforces handles to track problem stats and placement index.
-                    </p>
-                  </div>
-
-                  <div className="space-y-5">
-
-                    {/* LEETCODE CARD */}
-                    <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800/90 hover:border-amber-500/50 transition-all space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-lg">
-                            ⚡
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-bold text-white">LeetCode Profile</h3>
-                            <p className="text-xs text-slate-400">DSA problem count, contest rating & streak</p>
-                          </div>
-                        </div>
-
-                        {formData.leetcode_username && (
-                          <a
-                            href={`https://leetcode.com/${formData.leetcode_username}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-amber-400 hover:text-amber-300 font-semibold inline-flex items-center gap-1 bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20"
-                          >
-                            View Profile <ExternalLink className="w-3 h-3" />
-                          </a>
-                        )}
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-300">LeetCode Username</label>
-                        <div className="flex items-center gap-2">
-                          <div className="relative flex-1">
-                            <span className="absolute left-3.5 top-2.5 text-xs text-slate-500">leetcode.com/</span>
-                            <input
-                              type="text"
-                              value={formData.leetcode_username}
-                              onChange={(e) => handleInputChange('leetcode_username', e.target.value.trim())}
-                              placeholder="username"
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-amber-500 rounded-xl pl-28 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* HACKERRANK CARD */}
-                    <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800/90 hover:border-emerald-500/50 transition-all space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-lg">
-                            🟩
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-bold text-white">HackerRank Profile</h3>
-                            <p className="text-xs text-slate-400">Problem solving stars, badges & skill certificates</p>
-                          </div>
-                        </div>
-
-                        {formData.hackerrank_username && (
-                          <a
-                            href={`https://hackerrank.com/${formData.hackerrank_username}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20"
-                          >
-                            View Profile <ExternalLink className="w-3 h-3" />
-                          </a>
-                        )}
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-300">HackerRank Username</label>
-                        <div className="flex items-center gap-2">
-                          <div className="relative flex-1">
-                            <span className="absolute left-3.5 top-2.5 text-xs text-slate-500">hackerrank.com/</span>
-                            <input
-                              type="text"
-                              value={formData.hackerrank_username}
-                              onChange={(e) => handleInputChange('hackerrank_username', e.target.value.trim())}
-                              placeholder="username"
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-xl pl-32 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* CODECHEF & CODEFORCES & GFG GRID */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-                      {/* Codeforces */}
-                      <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-200">Codeforces</span>
-                          {formData.codeforces_username && (
-                            <a 
-                              href={`https://codeforces.com/profile/${formData.codeforces_username}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] text-indigo-400 hover:underline inline-flex items-center gap-0.5"
-                            >
-                              Link <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={formData.codeforces_username}
-                          onChange={(e) => handleInputChange('codeforces_username', e.target.value.trim())}
-                          placeholder="Handle"
-                          className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                        />
-                      </div>
-
-                      {/* CodeChef */}
-                      <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-200">CodeChef</span>
-                          {formData.codechef_username && (
-                            <a 
-                              href={`https://www.codechef.com/users/${formData.codechef_username}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] text-indigo-400 hover:underline inline-flex items-center gap-0.5"
-                            >
-                              Link <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={formData.codechef_username}
-                          onChange={(e) => handleInputChange('codechef_username', e.target.value.trim())}
-                          placeholder="Handle"
-                          className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                        />
-                      </div>
-
-                      {/* GeeksforGeeks */}
-                      <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-200">GeeksforGeeks</span>
-                          {formData.gfg_username && (
-                            <a 
-                              href={`https://auth.geeksforgeeks.org/user/${formData.gfg_username}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] text-indigo-400 hover:underline inline-flex items-center gap-0.5"
-                            >
-                              Link <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={formData.gfg_username}
-                          onChange={(e) => handleInputChange('gfg_username', e.target.value.trim())}
-                          placeholder="Username"
-                          className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                        />
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-slate-800">
-                    <button
-                      type="button"
-                      onClick={handleSaveProfile}
-                      disabled={isSaving}
-                      className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Coding Profiles'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 4: SOCIAL & PORTFOLIO LINKS */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'social' && (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
-                  <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                      <Share2 className="w-5 h-5 text-indigo-400" /> Social, Portfolio & Resume Links
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Showcase your open source code, professional network, personal web projects, and resume PDF.
-                    </p>
-                  </div>
-
-                  <div className="space-y-4">
-                    
-                    {/* GitHub */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">GitHub Profile URL</label>
-                      <div className="relative">
-                        <Globe className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                        <input
-                          type="url"
-                          value={formData.github_url}
-                          onChange={(e) => handleInputChange('github_url', e.target.value)}
-                          placeholder="https://github.com/username"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                    {/* LinkedIn */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">LinkedIn Profile URL</label>
-                      <div className="relative">
-                        <Globe className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                        <input
-                          type="url"
-                          value={formData.linkedin_url}
-                          onChange={(e) => handleInputChange('linkedin_url', e.target.value)}
-                          placeholder="https://linkedin.com/in/username"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Portfolio */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Personal Portfolio / Website</label>
-                      <div className="relative">
-                        <Globe className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                        <input
-                          type="url"
-                          value={formData.portfolio_url}
-                          onChange={(e) => handleInputChange('portfolio_url', e.target.value)}
-                          placeholder="https://myportfolio.dev"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Resume Link */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Resume Link (Google Drive / PDF / Hosted)</label>
-                      <div className="relative">
-                        <FileText className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                        <input
-                          type="url"
-                          value={formData.resume_url}
-                          onChange={(e) => handleInputChange('resume_url', e.target.value)}
-                          placeholder="https://drive.google.com/file/d/.../view"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none transition"
-                        />
-                      </div>
-                    </div>
-
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-slate-800">
-                    <button
-                      type="button"
-                      onClick={handleSaveProfile}
-                      disabled={isSaving}
-                      className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Links'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 5: PREP GOALS & AI PREFERENCES */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'preferences' && (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
-                  <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                      <Sliders className="w-5 h-5 text-indigo-400" /> Preparation Goals & AI Mentor Settings
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Customize daily problem-solving targets, preferred programming language, and alert notifications.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    
-                    {/* Language */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Preferred Coding Language</label>
-                      <select
-                        value={formData.preferred_language}
-                        onChange={(e) => handleInputChange('preferred_language', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                      >
-                        <option value="Python">Python 3</option>
-                        <option value="C++">C++ (C++20)</option>
-                        <option value="Java">Java (JDK 21)</option>
-                        <option value="JavaScript">JavaScript (Node.js)</option>
-                        <option value="TypeScript">TypeScript</option>
-                        <option value="Go">Golang</option>
-                      </select>
-                    </div>
-
-                    {/* Prep Level */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Preparation Difficulty Tier</label>
-                      <select
-                        value={formData.prep_level}
-                        onChange={(e) => handleInputChange('prep_level', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                      >
-                        <option value="Beginner">Beginner (Foundations & Easy)</option>
-                        <option value="Intermediate">Intermediate (Standard SDE & Medium)</option>
-                        <option value="Advanced">Advanced (Top Tier FAANG & Hard)</option>
-                      </select>
-                    </div>
-
-                    {/* Daily DSA Goal */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Daily DSA Problems Goal</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={formData.daily_dsa_goal}
-                        onChange={(e) => handleInputChange('daily_dsa_goal', Number(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                      />
-                    </div>
-
-                    {/* Daily Aptitude Goal */}
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-300">Daily Aptitude Tests Goal</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={10}
-                        value={formData.daily_aptitude_goal}
-                        onChange={(e) => handleInputChange('daily_aptitude_goal', Number(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Notification Toggle */}
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-bold text-white">Placement Drive Alerts & Daily Reminders</h4>
-                      <p className="text-xs text-slate-400">Receive email reminders for streak continuity and upcoming test deadlines.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={formData.email_notifications}
-                      onChange={(e) => handleInputChange('email_notifications', e.target.checked)}
-                      className="w-5 h-5 accent-indigo-600 rounded cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="flex justify-end pt-4 border-t border-slate-800">
-                    <button
-                      type="button"
-                      onClick={handleSaveProfile}
-                      disabled={isSaving}
-                      className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shadow-lg shadow-indigo-500/25 flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" /> {isSaving ? 'Saving...' : 'Save Preferences'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 6: ACCOUNT & SECURITY */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'security' && (
-                <div className="space-y-6">
-                  
-                  {/* Password Change Card */}
-                  <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
-                    <div>
-                      <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                        <KeyRound className="w-5 h-5 text-indigo-400" /> Change Account Password
-                      </h2>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Update your password to keep your PrepNest account secure.
+            {/* RIGHT COLUMN: Active Category Content Panel */}
+            <section className="lg:col-span-8 xl:col-span-9">
+              <div className="bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] rounded-2xl p-5 sm:p-7 shadow-sm">
+                {/* 1. PERSONAL & CAREER */}
+                {activeTab === 'personal' && (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <div className="pb-4 border-b border-[#E2E8F0] dark:border-[#30363D]">
+                      <h3 className="text-base font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                        Personal &amp; Career Identity
+                      </h3>
+                      <p className="text-xs text-[#64748B] mt-0.5">
+                        Update your profile picture, contact information, career objective, target companies, and verified skills.
                       </p>
                     </div>
 
-                    {passwordStatus && (
-                      <div className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-semibold ${
-                        passwordStatus.type === 'success' 
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
-                          : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                      }`}>
-                        {passwordStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertCircle className="w-4 h-4 text-rose-400" />}
-                        <span>{passwordStatus.text}</span>
+                    {/* Profile Picture Dropzone Card */}
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragOverAvatar(true);
+                      }}
+                      onDragLeave={() => setIsDragOverAvatar(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOverAvatar(false);
+                        const dropped = e.dataTransfer.files?.[0];
+                        if (dropped) processSelectedAvatarFile(dropped);
+                      }}
+                      className={`p-4 rounded-xl border border-dashed transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                        isDragOverAvatar
+                          ? 'border-[#F59E0B] bg-[#FFF8EE]/70 dark:bg-[#FFA116]/10'
+                          : 'border-[#E2E8F0] dark:border-[#30363D] bg-[#F8FAFC] dark:bg-[#0D1117]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <UserAvatar
+                          src={user?.avatar_url}
+                          name={displayName}
+                          size="xl"
+                          className="border-2 border-[#F59E0B]/60 shadow-sm"
+                        />
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                            Profile Picture
+                          </h4>
+                          <p className="text-[11px] text-[#64748B]">
+                            Drag &amp; drop an image here or click to upload &amp; crop. Visible across Topbar, Sidebar, Community &amp; Leaderboard.
+                          </p>
+                          <p className="text-[11px] text-[#94A3B8]">
+                            Supported: JPG, JPEG, PNG, WebP (Max 5 MB)
+                          </p>
+                        </div>
                       </div>
-                    )}
 
-                    <form onSubmit={handleChangePasswordSubmit} className="space-y-4">
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          loading={isAvatarBusy}
+                          onClick={() => fileInputRef.current?.click()}
+                          icon={<Upload className="w-3.5 h-3.5" />}
+                        >
+                          {user?.avatar_url ? 'Change Photo' : 'Upload Photo'}
+                        </Button>
+                        {user?.avatar_url && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={isAvatarBusy}
+                            onClick={handleRemovePhoto}
+                            className="text-[#DC2626] hover:bg-[#FEF2F2]"
+                            icon={<Trash2 className="w-3.5 h-3.5" />}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Personal Information Group */}
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-bold text-[#64748B] uppercase tracking-wider">
+                        Personal Information
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3] flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-[#64748B]" />
+                            <span>Full Name</span>
+                          </label>
+                          <input
+                            type="text"
+                            name="full_name"
+                            value={formData.full_name}
+                            onChange={handleInputChange}
+                            className="lc-input"
+                            placeholder="Your full name"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3] flex items-center justify-between">
+                            <span className="flex items-center gap-1.5">
+                              <Mail className="w-3.5 h-3.5 text-[#64748B]" />
+                              <span>Email Address</span>
+                            </span>
+                            <span className="text-[10px] font-semibold text-[#16A34A]">
+                              Verified
+                            </span>
+                          </label>
+                          <input
+                            type="email"
+                            name="email"
+                            value={formData.email}
+                            readOnly
+                            className="lc-input opacity-80 cursor-not-allowed bg-[#F8FAFC] dark:bg-[#0D1117]"
+                            title="Email address is linked to your authentication session"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3] flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5 text-[#64748B]" />
+                            <span>Phone Number</span>
+                          </label>
+                          <input
+                            type="text"
+                            name="phone"
+                            value={formData.phone}
+                            onChange={handleInputChange}
+                            className="lc-input"
+                            placeholder="+91 98765 43210"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3] flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-[#64748B]" />
+                            <span>Location</span>
+                          </label>
+                          <input
+                            type="text"
+                            name="location"
+                            value={formData.location}
+                            onChange={handleInputChange}
+                            className="lc-input"
+                            placeholder="City, State"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Career Information Group */}
+                    <div className="space-y-3 pt-4 border-t border-[#E2E8F0] dark:border-[#30363D]">
+                      <h4 className="text-xs font-bold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
+                        <Briefcase className="w-3.5 h-3.5 text-[#F59E0B]" />
+                        <span>Career Information</span>
+                      </h4>
+
                       <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-slate-300">Current Password</label>
+                        <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3]">
+                          Target Role
+                        </label>
                         <input
-                          type="password"
-                          required
-                          value={passwordData.current_password}
-                          onChange={(e) => setPasswordData(prev => ({ ...prev, current_password: e.target.value }))}
-                          placeholder="••••••••"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
+                          type="text"
+                          name="target_role"
+                          value={formData.target_role}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. Software Development Engineer (SDE-1)"
+                        />
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {SUGGESTED_ROLES.slice(0, 4).map((role) => (
+                            <button
+                              key={role}
+                              type="button"
+                              onClick={() => handleFieldChange('target_role', role)}
+                              className="text-[11px] px-2 py-0.5 rounded bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D] text-[#64748B] hover:text-[#F59E0B] hover:border-[#F59E0B]/40 transition cursor-pointer"
+                            >
+                              {role}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3]">
+                          Career Objective
+                        </label>
+                        <input
+                          type="text"
+                          name="career_objective"
+                          value={formData.career_objective}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. Seeking a backend-focused SDE role building distributed, low-latency systems."
                         />
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-300">New Password</label>
-                          <input
-                            type="password"
-                            required
-                            value={passwordData.new_password}
-                            onChange={(e) => setPasswordData(prev => ({ ...prev, new_password: e.target.value }))}
-                            placeholder="At least 6 characters"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-300">Confirm New Password</label>
-                          <input
-                            type="password"
-                            required
-                            value={passwordData.confirm_password}
-                            onChange={(e) => setPasswordData(prev => ({ ...prev, confirm_password: e.target.value }))}
-                            placeholder="Confirm password"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none transition"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end pt-2">
-                        <button
-                          type="submit"
-                          disabled={isChangingPass}
-                          className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm transition shadow-lg shadow-purple-500/25 flex items-center gap-2 disabled:opacity-50"
-                        >
-                          <KeyRound className="w-4 h-4" /> {isChangingPass ? 'Updating...' : 'Update Password'}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-
-                  {/* Plan & Credits Details */}
-                  <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-4 shadow-xl">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                      <Zap className="w-5 h-5 text-amber-400" /> Membership Plan & AI Credits
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                        <span className="text-xs text-slate-400 font-semibold">Active Plan</span>
-                        <div className="text-lg font-extrabold text-white flex items-center gap-2">
-                          <span>{user?.plan || 'Pro Tier'}</span>
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/30">Active</span>
-                        </div>
-                        <p className="text-xs text-slate-500">Unlimited DSA questions, Mock interviews & Roadmap tracks.</p>
-                      </div>
-
-                      <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                        <span className="text-xs text-slate-400 font-semibold">AI Tokens Remaining</span>
-                        <div className="text-lg font-extrabold text-indigo-400">
-                          {user?.credits ?? 250} Credits
-                        </div>
-                        <p className="text-xs text-slate-500">Used for Resume Analyzer and AI Mock Interview evaluations.</p>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3]">
+                          Professional Summary
+                        </label>
+                        <textarea
+                          name="bio"
+                          value={formData.bio}
+                          onChange={handleInputChange}
+                          rows={3}
+                          className="lc-input resize-none"
+                          placeholder="Summarize your core engineering strengths, notable projects, and placement focus..."
+                        />
                       </div>
                     </div>
-                  </div>
 
-                </div>
-              )}
+                    {/* Target Companies */}
+                    <div className="space-y-2.5 pt-4 border-t border-[#E2E8F0] dark:border-[#30363D]">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-[#1E293B] dark:text-[#E6EDF3] flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 text-[#F59E0B]" />
+                          <span>Target Companies</span>
+                        </label>
+                        <span className="text-[11px] text-[#64748B]">
+                          {formData.target_companies.length} selected
+                        </span>
+                      </div>
 
+                      <div className="flex flex-wrap gap-1.5">
+                        {formData.target_companies.map((c) => (
+                          <span
+                            key={c}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#FFF8EE] dark:bg-[#FFA116]/15 border border-[#F59E0B]/30 text-xs font-semibold text-[#D97706] dark:text-[#FFA116]"
+                          >
+                            <span>{c}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCompany(c)}
+                              className="hover:text-[#DC2626] cursor-pointer"
+                              aria-label={`Remove ${c}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newCompanyInput}
+                          onChange={(e) => setNewCompanyInput(e.target.value)}
+                          onKeyDown={(e) =>
+                            e.key === 'Enter' && (e.preventDefault(), handleAddCompany())
+                          }
+                          placeholder="Add target company (e.g. Uber, Swiggy)..."
+                          className="lc-input text-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleAddCompany()}
+                          icon={<Plus className="w-3.5 h-3.5" />}
+                        >
+                          Add
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-[#64748B]">
+                        <span>Suggestions:</span>
+                        {SUGGESTED_COMPANIES.filter(
+                          (c) => !formData.target_companies.includes(c)
+                        )
+                          .slice(0, 7)
+                          .map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => handleAddCompany(c)}
+                              className="px-2 py-0.5 rounded bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D] hover:border-[#F59E0B] hover:text-[#F59E0B] transition cursor-pointer"
+                            >
+                              + {c}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+
+                    {/* Technical Skills (Add, Inline Edit & Remove) */}
+                    <div className="space-y-2.5 pt-4 border-t border-[#E2E8F0] dark:border-[#30363D]">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                          Technical Skills
+                        </label>
+                        <span className="text-[11px] text-[#64748B]">
+                          Click edit icon on any tag to rename
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {formData.skills.map((s, idx) =>
+                          editingSkillIdx === idx ? (
+                            <span
+                              key={`edit-${idx}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-[#0D1117] border border-[#F59E0B]"
+                            >
+                              <input
+                                type="text"
+                                value={editingSkillValue}
+                                onChange={(e) => setEditingSkillValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleCommitSkillEdit(idx);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingSkillIdx(null);
+                                  }
+                                }}
+                                autoFocus
+                                className="text-xs w-28 bg-transparent outline-none text-[#1E293B] dark:text-[#E6EDF3]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleCommitSkillEdit(idx)}
+                                className="text-[#16A34A] cursor-pointer"
+                                aria-label="Confirm skill edit"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ) : (
+                            <span
+                              key={`${s}-${idx}`}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D] text-xs font-medium text-[#1E293B] dark:text-[#E6EDF3]"
+                            >
+                              <span>{s}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSkillIdx(idx);
+                                  setEditingSkillValue(s);
+                                }}
+                                className="text-[#94A3B8] hover:text-[#F59E0B] cursor-pointer"
+                                title="Edit skill"
+                                aria-label={`Edit ${s}`}
+                              >
+                                <Pencil className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSkill(s)}
+                                className="text-[#94A3B8] hover:text-[#DC2626] cursor-pointer"
+                                title="Remove skill"
+                                aria-label={`Remove ${s}`}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          )
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newSkillInput}
+                          onChange={(e) => setNewSkillInput(e.target.value)}
+                          onKeyDown={(e) =>
+                            e.key === 'Enter' && (e.preventDefault(), handleAddSkill())
+                          }
+                          placeholder="Add technical skill (e.g. FastAPI, Redis, Kubernetes)..."
+                          className="lc-input text-xs"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleAddSkill()}
+                          icon={<Plus className="w-3.5 h-3.5" />}
+                        >
+                          Add
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px] text-[#64748B]">
+                        <span>Popular:</span>
+                        {SUGGESTED_SKILLS.filter((s) => !formData.skills.includes(s))
+                          .slice(0, 7)
+                          .map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => handleAddSkill(s)}
+                              className="px-2 py-0.5 rounded bg-[#F8FAFC] dark:bg-[#0D1117] border border-[#E2E8F0] dark:border-[#30363D] hover:border-[#F59E0B] hover:text-[#F59E0B] transition cursor-pointer"
+                            >
+                              + {s}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-[#E2E8F0] dark:border-[#30363D] flex justify-end">
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={isSaving}
+                        icon={<Save className="w-3.5 h-3.5" />}
+                      >
+                        Save Personal &amp; Career
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {/* 2. ACADEMIC DETAILS */}
+                {activeTab === 'academic' && (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <div className="pb-4 border-b border-[#E2E8F0] dark:border-[#30363D]">
+                      <h3 className="text-base font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                        Academic Details
+                      </h3>
+                      <p className="text-xs text-[#64748B] mt-0.5">
+                        Keep your university records accurate for campus placement eligibility tracking.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <label className="text-xs font-semibold text-[#1E293B] dark:text-[#E6EDF3]">
+                          University / Institution
+                        </label>
+                        <input
+                          type="text"
+                          name="college"
+                          value={formData.college}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. National Institute of Technology"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">Degree</label>
+                        <input
+                          type="text"
+                          name="degree"
+                          value={formData.degree}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. B.Tech / B.E. / MCA"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          Department / Branch
+                        </label>
+                        <input
+                          type="text"
+                          name="department"
+                          value={formData.department}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. Computer Science & Engineering"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          Graduation Year
+                        </label>
+                        <select
+                          name="grad_year"
+                          value={formData.grad_year}
+                          onChange={handleInputChange}
+                          className="lc-input cursor-pointer"
+                        >
+                          {[2023, 2024, 2025, 2026, 2027, 2028, 2029].map((yr) => (
+                            <option key={yr} value={yr}>
+                              {yr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          Current Semester
+                        </label>
+                        <select
+                          name="current_semester"
+                          value={formData.current_semester}
+                          onChange={handleInputChange}
+                          className="lc-input cursor-pointer"
+                        >
+                          {[
+                            'Semester 1',
+                            'Semester 2',
+                            'Semester 3',
+                            'Semester 4',
+                            'Semester 5',
+                            'Semester 6',
+                            'Semester 7',
+                            'Semester 8',
+                            'Graduated',
+                          ].map((sem) => (
+                            <option key={sem} value={sem}>
+                              {sem}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          CGPA (Out of 10.0)
+                        </label>
+                        <input
+                          type="text"
+                          name="cgpa"
+                          value={formData.cgpa}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. 8.75"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          Active Backlogs (if applicable)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          name="backlogs"
+                          value={formData.backlogs}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          Class 10th Percentage
+                        </label>
+                        <input
+                          type="text"
+                          name="tenth_percentage"
+                          value={formData.tenth_percentage}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. 92.4%"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-[#64748B]">
+                          Class 12th / Diploma Percentage
+                        </label>
+                        <input
+                          type="text"
+                          name="twelfth_percentage"
+                          value={formData.twelfth_percentage}
+                          onChange={handleInputChange}
+                          className="lc-input"
+                          placeholder="e.g. 89.6%"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-[#E2E8F0] dark:border-[#30363D] flex justify-end">
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={isSaving}
+                        icon={<Save className="w-3.5 h-3.5" />}
+                      >
+                        Save Academic Details
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {/* 3. CODING PROFILES */}
+                {activeTab === 'platforms' && (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <CodingProfilesSection
+                      formData={formData}
+                      onFieldChange={handleFieldChange}
+                    />
+                    <div className="pt-4 border-t border-[#E2E8F0] dark:border-[#30363D] flex justify-end">
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={isSaving}
+                        icon={<Save className="w-3.5 h-3.5" />}
+                      >
+                        Save Coding Profiles
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {/* 4. SOCIAL & PORTFOLIO */}
+                {activeTab === 'links' && (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <SocialPortfolioSection
+                      formData={formData}
+                      onFieldChange={handleFieldChange}
+                    />
+                    <div className="pt-4 border-t border-[#E2E8F0] dark:border-[#30363D] flex justify-end">
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={isSaving}
+                        icon={<Save className="w-3.5 h-3.5" />}
+                      >
+                        Save Social &amp; Portfolio
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {/* 5. PREPARATION GOALS */}
+                {activeTab === 'preferences' && (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <PreparationGoalsSection
+                      formData={formData}
+                      onFieldChange={handleFieldChange}
+                      onAddCompany={handleAddCompany}
+                      onRemoveCompany={handleRemoveCompany}
+                    />
+                    <div className="pt-4 border-t border-[#E2E8F0] dark:border-[#30363D] flex justify-end">
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={isSaving}
+                        icon={<Save className="w-3.5 h-3.5" />}
+                      >
+                        Save Preparation Goals
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {/* 6. SECURITY */}
+                {activeTab === 'security' && (
+                  <SecuritySection
+                    user={user}
+                    passwordData={passwordData}
+                    setPasswordData={setPasswordData}
+                    passwordStatus={passwordStatus}
+                    isChangingPass={isChangingPass}
+                    onChangePasswordSubmit={handleChangePasswordSubmit}
+                    onLogout={handleSignOut}
+                  />
+                )}
+
+                {/* 7. ACCOUNT PREFERENCES */}
+                {activeTab === 'account' && (
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
+                    <AccountPreferencesSection
+                      formData={formData}
+                      onFieldChange={handleFieldChange}
+                      isDark={isDark}
+                      setTheme={setTheme}
+                    />
+                    <div className="pt-4 border-t border-[#E2E8F0] dark:border-[#30363D] flex justify-end">
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="sm"
+                        loading={isSaving}
+                        icon={<Save className="w-3.5 h-3.5" />}
+                      >
+                        Save Account Preferences
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </section>
+          </div>
+        </BlurDrop>
+      </div>
+
+      {/* Avatar Crop & Preview Modal */}
+      <AvatarCropModal
+        isOpen={cropDraft.isOpen}
+        imageSrc={cropDraft.imageSrc}
+        fileName={cropDraft.fileName}
+        fileSize={cropDraft.fileSize}
+        isUploading={isAvatarBusy}
+        error={avatarError}
+        onClose={() => {
+          if (cropDraft.imageSrc) URL.revokeObjectURL(cropDraft.imageSrc);
+          setCropDraft({ isOpen: false, imageSrc: null, fileName: '', fileSize: 0 });
+        }}
+        onConfirm={handleConfirmAvatarCrop}
+      />
+
+      {/* Unsaved Changes Navigation Guard Modal */}
+      {pendingNavHref && (
+        <div
+          className="fixed inset-0 z-50 bg-[#0F172A]/55 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#FFFBEB] dark:bg-[#D97706]/15 border border-[#F59E0B]/30 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-[#F59E0B]" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#1E293B] dark:text-[#E6EDF3]">
+                  Unsaved Profile Changes
+                </h3>
+                <p className="text-xs text-[#64748B] mt-1">
+                  You have modified your settings without saving. Would you like to save your changes before leaving?
+                </p>
+              </div>
             </div>
 
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setPendingNavHref(null)}
+              >
+                Stay on Page
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const dest = pendingNavHref;
+                  handleDiscardChanges();
+                  setPendingNavHref(null);
+                  navigate(dest);
+                }}
+              >
+                Discard &amp; Leave
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={isSaving}
+                onClick={async () => {
+                  const dest = pendingNavHref;
+                  const ok = await handleSaveProfile();
+                  if (ok) {
+                    setPendingNavHref(null);
+                    navigate(dest);
+                  }
+                }}
+              >
+                Save &amp; Continue
+              </Button>
+            </div>
           </div>
-
-        </main>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

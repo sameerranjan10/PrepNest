@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 
 import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 import LandingPage from "./pages/Landing";
@@ -27,8 +28,9 @@ import CommunityPage from "./pages/Community";
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Router>
+    <ThemeProvider>
+      <AuthProvider>
+        <Router>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Navigate to="/landing" replace />} />
@@ -150,5 +152,6 @@ export default function App() {
         </Routes>
       </Router>
     </AuthProvider>
+    </ThemeProvider>
   );
 }

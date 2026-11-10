@@ -189,19 +189,42 @@ def build_selective_student_context(
     Never retrieves or sends full database dumps.
     Produces a compact, low-token text representation (<60-120 tokens).
     """
-    # 1. Fetch minimal student identity (1 fast query)
+    # 1. Fetch minimal student identity & preparation goals (1 fast query)
     user_info = {
         "name": "Student",
         "company": entities.get("company") or "Tech Company",
         "role": entities.get("role") or "Software Engineer",
         "lang": "Python",
         "level": "Intermediate",
+        "difficulty": "Medium",
+        "study_hours": 2.0,
+        "weekly_goal": "",
+        "deadline": "",
+        "subjects": [],
         "skills": []
     }
 
+    def _parse_str_list(raw_val) -> List[str]:
+        if not raw_val:
+            return []
+        if isinstance(raw_val, list):
+            return [str(x).strip() for x in raw_val if str(x).strip()]
+        if isinstance(raw_val, str):
+            s = raw_val.strip()
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            return [x.strip() for x in s.split(",") if x.strip()]
+        return []
+
     try:
         cursor.execute("""
-            SELECT full_name, target_companies, target_role, preferred_language, prep_level, skills
+            SELECT full_name, target_companies, target_role, preferred_language, prep_level, skills,
+                   daily_study_hours, weekly_prep_goal, prep_deadline, preferred_subjects, preferred_difficulty
             FROM users WHERE id = %s;
         """, (user_id,))
         u_row = cursor.fetchone()
@@ -209,14 +232,19 @@ def build_selective_student_context(
             u_dict = dict(u_row)
             user_info["name"] = u_dict.get("full_name") or "Student"
             if not entities.get("company") and u_dict.get("target_companies"):
-                user_info["company"] = u_dict["target_companies"]
+                companies_list = _parse_str_list(u_dict["target_companies"])
+                if companies_list:
+                    user_info["company"] = ", ".join(companies_list[:3])
             if not entities.get("role") and u_dict.get("target_role"):
                 user_info["role"] = u_dict["target_role"]
             user_info["lang"] = u_dict.get("preferred_language") or "Python"
             user_info["level"] = u_dict.get("prep_level") or "Intermediate"
-            if u_dict.get("skills"):
-                sk = u_dict["skills"]
-                user_info["skills"] = [s.strip() for s in sk.split(",") if s.strip()] if isinstance(sk, str) else sk
+            user_info["difficulty"] = u_dict.get("preferred_difficulty") or "Medium"
+            user_info["study_hours"] = u_dict.get("daily_study_hours") or 2.0
+            user_info["weekly_goal"] = (u_dict.get("weekly_prep_goal") or "").strip()
+            user_info["deadline"] = (u_dict.get("prep_deadline") or "").strip()
+            user_info["subjects"] = _parse_str_list(u_dict.get("preferred_subjects"))
+            user_info["skills"] = _parse_str_list(u_dict.get("skills"))
     except Exception as e:
         logger.warning(f"Error fetching base user context: {e}")
 
@@ -314,7 +342,11 @@ def build_selective_student_context(
 
         return (
             f"Student: {user_info['name']} | Target: {user_info['company']} -> {user_info['role']}\n"
-            f"Top Weak Skills: {', '.join(missing_skills) if missing_skills else 'DSA, REST APIs'}\n"
+            f"Goals: {user_info['study_hours']}h/day | Difficulty: {user_info['difficulty']}"
+            + (f" | Deadline: {user_info['deadline']}" if user_info['deadline'] else "")
+            + (f" | Focus Subjects: {', '.join(user_info['subjects'][:4])}" if user_info['subjects'] else "")
+            + (f" | Weekly Goal: {user_info['weekly_goal']}" if user_info['weekly_goal'] else "")
+            + f"\nTop Weak Skills: {', '.join(missing_skills) if missing_skills else 'DSA, REST APIs'}\n"
             f"Next Roadmap Topics: {', '.join(next_topics) if next_topics else 'Arrays, REST APIs'}\n"
             f"DSA Solved: {dsa_count}"
         )
@@ -410,7 +442,9 @@ def build_selective_student_context(
         # GENERAL default compact context
         return (
             f"Student: {user_info['name']} | Target: {user_info['company']} -> {user_info['role']}\n"
-            f"Language: {user_info['lang']} | Level: {user_info['level']}"
+            f"Language: {user_info['lang']} | Level: {user_info['level']} | Difficulty: {user_info['difficulty']} | Study: {user_info['study_hours']}h/day"
+            + (f" | Subjects: {', '.join(user_info['subjects'][:4])}" if user_info['subjects'] else "")
+            + (f" | Deadline: {user_info['deadline']}" if user_info['deadline'] else "")
         )
 
 
@@ -644,24 +678,53 @@ def get_student_context_summary(user_id: int, cursor) -> Dict[str, Any]:
         "target_role": "Software Engineer",
         "preferred_language": "Python",
         "prep_level": "Intermediate",
+        "preferred_difficulty": "Medium",
+        "daily_study_hours": 2.0,
+        "weekly_prep_goal": "",
+        "prep_deadline": "",
+        "preferred_subjects": [],
         "skills": []
     }
 
     try:
         cursor.execute("""
-            SELECT full_name, target_companies, target_role, preferred_language, prep_level, skills
+            SELECT full_name, target_companies, target_role, preferred_language, prep_level, skills,
+                   preferred_difficulty, daily_study_hours, weekly_prep_goal, prep_deadline, preferred_subjects
             FROM users WHERE id = %s;
         """, (user_id,))
         u = cursor.fetchone()
         if u:
             context["full_name"] = u.get("full_name") or "Student"
-            context["target_company"] = u.get("target_companies") or "Tech Company"
+            raw_companies = u.get("target_companies")
+            if raw_companies:
+                try:
+                    parsed_comp = json.loads(raw_companies) if isinstance(raw_companies, str) and raw_companies.strip().startswith("[") else [c.strip() for c in str(raw_companies).split(",") if c.strip()]
+                    if isinstance(parsed_comp, list) and parsed_comp:
+                        context["target_company"] = ", ".join(str(x).strip() for x in parsed_comp[:3] if str(x).strip())
+                except Exception:
+                    context["target_company"] = str(raw_companies)
             context["target_role"] = u.get("target_role") or "Software Engineer"
             context["preferred_language"] = u.get("preferred_language") or "Python"
             context["prep_level"] = u.get("prep_level") or "Intermediate"
+            context["preferred_difficulty"] = u.get("preferred_difficulty") or "Medium"
+            context["daily_study_hours"] = float(u.get("daily_study_hours") or 2.0)
+            context["weekly_prep_goal"] = u.get("weekly_prep_goal") or ""
+            context["prep_deadline"] = u.get("prep_deadline") or ""
+            raw_subj = u.get("preferred_subjects")
+            if raw_subj:
+                try:
+                    context["preferred_subjects"] = json.loads(raw_subj) if isinstance(raw_subj, str) and raw_subj.strip().startswith("[") else [s.strip() for s in str(raw_subj).split(",") if s.strip()]
+                except Exception:
+                    context["preferred_subjects"] = []
             if u.get("skills"):
                 sk = u["skills"]
-                context["skills"] = [s.strip() for s in sk.split(",") if s.strip()] if isinstance(sk, str) else sk
+                if isinstance(sk, str) and sk.strip().startswith("["):
+                    try:
+                        context["skills"] = json.loads(sk)
+                    except Exception:
+                        context["skills"] = [s.strip() for s in sk.split(",") if s.strip()]
+                else:
+                    context["skills"] = [s.strip() for s in sk.split(",") if s.strip()] if isinstance(sk, str) else sk
     except Exception as e:
         logger.warning(f"Error fetching base profile: {e}")
 
@@ -756,6 +819,11 @@ def get_student_context_summary(user_id: int, cursor) -> Dict[str, Any]:
         "target_role": context.get("target_role", "Software Engineer"),
         "preferred_language": context.get("preferred_language", "Python"),
         "prep_level": context.get("prep_level", "Intermediate"),
+        "preferred_difficulty": context.get("preferred_difficulty", "Medium"),
+        "daily_study_hours": context.get("daily_study_hours", 2.0),
+        "weekly_prep_goal": context.get("weekly_prep_goal", ""),
+        "prep_deadline": context.get("prep_deadline", ""),
+        "preferred_subjects": context.get("preferred_subjects", []),
         "ats_score": ats_score,
         "readiness_level": readiness_level,
         "skill_match_percentage": skill_match_pct,

@@ -20,6 +20,11 @@ import {
   Maximize2,
   Minimize2
 } from 'lucide-react';
+import { Badge, DifficultyBadge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { apiFetch, notifyStatsUpdated } from '@/lib/apiClient';
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated }) {
   const [problem, setProblem] = useState(null);
@@ -58,12 +63,10 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
   const fetchProblemDetails = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/dsa/problems/${problemId}`);
+      const res = await apiFetch(`/api/dsa/problems/${problemId}`);
       if (res.ok) {
         const data = await res.json();
         setProblem(data);
-
-        // Initialize editor code based on default language
         initEditorCode(data, 'python');
       }
     } catch (err) {
@@ -106,7 +109,7 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
     setRunResult(null);
     setActiveConsoleTab('output');
     try {
-      const res = await fetch('http://localhost:8000/api/dsa/run-code', {
+      const res = await fetch(`${API_BASE}/api/dsa/run-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,11 +145,9 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
   const handleSubmitSolution = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch('http://localhost:8000/api/dsa/submit-code', {
+      const res = await apiFetch('/api/dsa/submit-code', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: 1,
           problem_id: problemId,
           language: selectedLanguage,
           code: editorCode
@@ -154,6 +155,7 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
       });
       if (res.ok) {
         setSubmitSuccess(true);
+        notifyStatsUpdated();
         if (problem) {
           setProblem({ ...problem, is_solved: true });
         }
@@ -172,13 +174,13 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
   const handleToggleSolved = async () => {
     if (!problem) return;
     try {
-      const res = await fetch('http://localhost:8000/api/dsa/toggle-solved', {
+      const res = await apiFetch('/api/dsa/toggle-solved', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem_id: problem.id, user_id: 1 })
+        body: JSON.stringify({ problem_id: problem.id })
       });
       if (res.ok) {
         const data = await res.json();
+        notifyStatsUpdated();
         setProblem({ ...problem, is_solved: data.is_solved });
         if (onProblemUpdated) {
           onProblemUpdated(problem.id, { is_solved: data.is_solved });
@@ -192,10 +194,9 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
   const handleToggleBookmark = async () => {
     if (!problem) return;
     try {
-      const res = await fetch('http://localhost:8000/api/dsa/toggle-bookmark', {
+      const res = await apiFetch('/api/dsa/toggle-bookmark', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem_id: problem.id, user_id: 1 })
+        body: JSON.stringify({ problem_id: problem.id })
       });
       if (res.ok) {
         const data = await res.json();
@@ -243,80 +244,68 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
   if (!problemId) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-2 sm:p-4 animate-in fade-in duration-150">
       <div 
-        className={`bg-slate-950 border border-slate-800 rounded-2xl flex flex-col shadow-2xl overflow-hidden transition-all duration-300 ${
-          isFullscreen ? 'w-full h-full rounded-none border-none' : 'w-full max-w-[96vw] h-[92vh]'
+        className={`bg-white border border-[#E5E7EB] rounded-xl flex flex-col shadow-2xl overflow-hidden transition-all duration-200 ${
+          isFullscreen ? 'w-full h-full rounded-none border-none' : 'w-full max-w-7xl h-[92vh]'
         }`}
       >
         {/* Header Bar */}
-        <div className="px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-4 flex-shrink-0">
+        <div className="px-5 py-3 bg-[#F7F8FA] border-b border-[#E5E7EB] flex items-center justify-between gap-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             {problem && (
               <>
                 <button
                   onClick={handleToggleSolved}
-                  className="flex items-center gap-1.5 p-1 rounded-lg hover:bg-slate-800 transition"
+                  className="flex items-center gap-1.5 p-1 rounded hover:bg-[#E5E7EB] transition text-[#94A3B8]"
                   title={problem.is_solved ? 'Mark as Unsolved' : 'Mark as Solved (+25 XP)'}
                 >
                   {problem.is_solved ? (
-                    <CheckCircle className="w-5 h-5 text-emerald-400 fill-emerald-500/20" />
+                    <CheckCircle className="w-5 h-5 text-[#16A34A] fill-[#16A34A]/10" />
                   ) : (
-                    <Circle className="w-5 h-5 text-slate-500 hover:text-slate-300" />
+                    <Circle className="w-5 h-5 text-[#CBD5E1] hover:text-[#16A34A]" />
                   )}
                 </button>
 
                 <button
                   onClick={handleToggleBookmark}
-                  className="p-1 rounded-lg hover:bg-slate-800 transition"
+                  className="p-1 rounded hover:bg-[#E5E7EB] transition"
                   title="Bookmark problem"
                 >
-                  <Star className={`w-4 h-4 ${problem.is_bookmarked ? 'text-amber-400 fill-amber-400' : 'text-slate-500 hover:text-slate-300'}`} />
+                  <Star className={`w-4 h-4 ${problem.is_bookmarked ? 'text-[#FFA116] fill-[#FFA116]' : 'text-[#CBD5E1] hover:text-[#FFA116]'}`} />
                 </button>
 
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm sm:text-base font-extrabold text-white truncate max-w-md">
-                      {problem.title}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                        problem.difficulty === 'Easy'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : problem.difficulty === 'Medium'
-                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                      }`}
-                    >
-                      {problem.difficulty}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      Acceptance: {problem.acceptance_rate}%
-                    </span>
-                  </div>
+                <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                  <span className="text-sm sm:text-base font-bold text-[#262626] truncate max-w-md">
+                    {problem.id}. {problem.title}
+                  </span>
+                  <DifficultyBadge difficulty={problem.difficulty} size="xs" />
+                  <span className="text-xs text-[#64748B] font-medium">
+                    Acceptance: {problem.acceptance_rate || 52}%
+                  </span>
                 </div>
               </>
             )}
           </div>
 
-          {/* Header Action Buttons */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {problem && (
+          {/* Action Buttons */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {problem?.link && (
               <a
                 href={problem.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] text-slate-400 hover:text-slate-200 transition"
+                className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-[#E5E7EB] text-xs text-[#64748B] hover:text-[#262626] hover:border-[#D1D5DB] transition"
                 title="View original problem on LeetCode"
               >
-                <span>LC</span>
+                <span>LeetCode</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             )}
 
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white transition"
+              className="p-1.5 rounded-md bg-white border border-[#E5E7EB] text-[#64748B] hover:text-[#262626] hover:bg-[#F7F8FA] transition"
               title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -324,22 +313,22 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-950/40 hover:text-rose-400 border border-slate-800 text-slate-400 transition"
+              className="p-1.5 rounded-md bg-white border border-[#E5E7EB] text-[#64748B] hover:text-[#DC2626] hover:bg-[#FEF2F2] transition"
               title="Close modal (Esc)"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {/* Success Banner */}
         {submitSuccess && (
-          <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 flex items-center justify-between text-xs font-bold text-white shadow-lg animate-in fade-in">
+          <div className="bg-[#F0FDF4] border-b border-[#16A34A]/30 px-4 py-2.5 flex items-center justify-between text-xs font-bold text-[#16A34A] animate-in fade-in">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
-              <span>Accepted! All test cases passed successfully! +25 XP awarded to your profile!</span>
+              <Sparkles className="w-4 h-4 text-[#FFA116]" />
+              <span>Accepted! Solution passed all test cases. +25 XP awarded to your PrepNest profile!</span>
             </div>
-            <button onClick={() => setSubmitSuccess(false)} className="text-white/80 hover:text-white">
+            <button onClick={() => setSubmitSuccess(false)} className="text-[#16A34A] hover:opacity-75">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -347,24 +336,22 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
         {/* Content Body: Split View (Left: Description/Tutorial, Right: Code Playground) */}
         {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
-            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs font-semibold">Loading in-platform problem data and solutions...</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[#64748B]">
+            <div className="w-6 h-6 border-2 border-[#FFA116] border-t-transparent rounded-full animate-spin" />
+            <span className="text-xs font-medium">Loading problem details...</span>
           </div>
         ) : (
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-800 overflow-hidden">
-            {/* =========================================================
-                LEFT PANEL: PROBLEM STATEMENT, VERIFIED SOLUTIONS, HINTS
-            ========================================================= */}
-            <div className="flex flex-col h-full overflow-hidden bg-slate-950">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E5E7EB] overflow-hidden">
+            {/* LEFT PANEL: PROBLEM STATEMENT, VERIFIED SOLUTIONS, HINTS */}
+            <div className="flex flex-col h-full overflow-hidden bg-white">
               {/* Left Sub-Tabs Header */}
-              <div className="px-4 py-2 bg-slate-900/50 border-b border-slate-800/80 flex items-center gap-2 overflow-x-auto flex-shrink-0">
+              <div className="px-4 py-2 bg-[#F7F8FA] border-b border-[#E5E7EB] flex items-center gap-2 overflow-x-auto shrink-0">
                 <button
                   onClick={() => setActiveLeftTab('description')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
                     activeLeftTab === 'description'
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                      ? 'bg-white text-[#262626] shadow-sm border border-[#E5E7EB]'
+                      : 'text-[#64748B] hover:text-[#262626]'
                   }`}
                 >
                   <BookOpen className="w-3.5 h-3.5" />
@@ -373,15 +360,15 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
                 <button
                   onClick={() => setActiveLeftTab('solutions')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
                     activeLeftTab === 'solutions'
-                      ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                      ? 'bg-white text-[#FFA116] shadow-sm border border-[#E5E7EB]'
+                      : 'text-[#64748B] hover:text-[#262626]'
                   }`}
                 >
                   <Code2 className="w-3.5 h-3.5" />
                   <span>Verified Solutions</span>
-                  <span className="px-1.5 py-0.2 text-[9px] rounded-full bg-black/40 text-amber-200">
+                  <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-[#FFF8EE] text-[#FFA116] font-bold">
                     {Object.keys(problem?.solutions || {}).length || 'Multi'}
                   </span>
                 </button>
@@ -389,13 +376,13 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 {problem?.editorial && (
                   <button
                     onClick={() => setActiveLeftTab('editorial')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
                       activeLeftTab === 'editorial'
-                        ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/30'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        ? 'bg-white text-[#262626] shadow-sm border border-[#E5E7EB]'
+                        : 'text-[#64748B] hover:text-[#262626]'
                     }`}
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
+                    <Sparkles className="w-3.5 h-3.5 text-[#FFA116]" />
                     <span>Editorial</span>
                   </button>
                 )}
@@ -403,10 +390,10 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 {(problem?.hints || []).length > 0 && (
                   <button
                     onClick={() => setActiveLeftTab('hints')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
                       activeLeftTab === 'hints'
-                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                        ? 'bg-white text-[#262626] shadow-sm border border-[#E5E7EB]'
+                        : 'text-[#64748B] hover:text-[#262626]'
                     }`}
                   >
                     <HelpCircle className="w-3.5 h-3.5" />
@@ -416,25 +403,25 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
               </div>
 
               {/* Left Tab Body */}
-              <div className="flex-1 p-5 overflow-y-auto space-y-5 text-slate-200">
+              <div className="flex-1 p-5 overflow-y-auto space-y-5 text-[#262626]">
                 {/* TAB 1: DESCRIPTION */}
                 {activeLeftTab === 'description' && (
-                  <div className="space-y-6">
-                    {/* Companies & Topics Pills */}
-                    <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-slate-900">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Topics:</span>
+                  <div className="space-y-5">
+                    {/* Companies & Topics */}
+                    <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-[#F1F3F5]">
+                      <span className="text-[11px] font-semibold text-[#64748B]">Topics:</span>
                       {(problem.topics || []).map((t, idx) => (
-                        <span key={idx} className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300 font-medium">
+                        <span key={idx} className="text-[11px] px-2 py-0.5 rounded bg-[#F1F3F5] text-[#64748B] font-medium">
                           {t}
                         </span>
                       ))}
 
                       {(problem.companies || []).length > 0 && (
                         <>
-                          <div className="w-px h-3 bg-slate-800 mx-1" />
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Asked By:</span>
+                          <div className="w-px h-3 bg-[#E5E7EB] mx-1" />
+                          <span className="text-[11px] font-semibold text-[#64748B]">Asked By:</span>
                           {(problem.companies || []).slice(0, 5).map((c, idx) => (
-                            <span key={idx} className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-950/40 border border-indigo-800/50 text-indigo-300 font-medium">
+                            <span key={idx} className="text-[11px] px-2 py-0.5 rounded bg-[#FFF8EE] text-[#FFA116] border border-[#FFA116]/20 font-medium">
                               {c}
                             </span>
                           ))}
@@ -443,36 +430,36 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                     </div>
 
                     {/* Problem Statement Text */}
-                    <div className="prose prose-invert prose-xs max-w-none text-xs sm:text-sm text-slate-300 leading-relaxed font-sans whitespace-pre-line">
+                    <div className="text-sm text-[#262626] leading-relaxed whitespace-pre-line font-sans">
                       {problem.description}
                     </div>
 
                     {/* Examples Section */}
                     {(problem.examples || []).length > 0 && (
                       <div className="space-y-3 pt-2">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Examples</h4>
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Examples</h4>
                         {(problem.examples || []).map((ex, idx) => (
-                          <div key={idx} className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1.5 font-mono text-xs">
-                            <div className="font-bold text-slate-400 text-[11px]">Example {idx + 1}:</div>
+                          <div key={idx} className="p-3.5 rounded-lg bg-[#F7F8FA] border border-[#E5E7EB] space-y-1.5 font-mono text-xs">
+                            <div className="font-bold text-[#64748B] text-[11px]">Example {idx + 1}:</div>
                             {ex.input && (
                               <div>
-                                <span className="text-indigo-400 font-semibold">Input: </span>
-                                <span className="text-slate-300">{ex.input}</span>
+                                <span className="text-[#262626] font-semibold">Input: </span>
+                                <span className="text-[#64748B]">{ex.input}</span>
                               </div>
                             )}
                             {ex.output && (
                               <div>
-                                <span className="text-emerald-400 font-semibold">Output: </span>
-                                <span className="text-slate-300">{ex.output}</span>
+                                <span className="text-[#16A34A] font-semibold">Output: </span>
+                                <span className="text-[#64748B]">{ex.output}</span>
                               </div>
                             )}
                             {ex.explanation && (
-                              <div className="text-slate-400 text-[11px] font-sans pt-1">
-                                <span className="text-slate-500 font-semibold">Explanation: </span>
+                              <div className="text-[#64748B] text-[11px] font-sans pt-1">
+                                <span className="font-semibold text-[#262626]">Explanation: </span>
                                 {ex.explanation}
                               </div>
                             )}
-                            {ex.text && <div className="text-slate-300 whitespace-pre-wrap">{ex.text}</div>}
+                            {ex.text && <div className="text-[#262626] whitespace-pre-wrap">{ex.text}</div>}
                           </div>
                         ))}
                       </div>
@@ -481,10 +468,10 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                     {/* Constraints Section */}
                     {(problem.constraints || []).length > 0 && (
                       <div className="space-y-2 pt-2">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Constraints</h4>
-                        <ul className="list-disc list-inside space-y-1 text-xs text-slate-400 font-mono">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Constraints</h4>
+                        <ul className="list-disc list-inside space-y-1 text-xs text-[#64748B] font-mono">
                           {(problem.constraints || []).map((c, idx) => (
-                            <li key={idx}>{c}</li>
+                            <li key={idx}><span className="text-[#262626]">{c}</span></li>
                           ))}
                         </ul>
                       </div>
@@ -496,7 +483,7 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 {activeLeftTab === 'solutions' && (
                   <div className="space-y-4">
                     {/* Language Switcher for Solutions */}
-                    <div className="flex items-center justify-between gap-2 bg-slate-900/80 p-1.5 rounded-xl border border-slate-800">
+                    <div className="flex items-center justify-between gap-2 bg-[#F7F8FA] p-1.5 rounded-lg border border-[#E5E7EB]">
                       <div className="flex items-center gap-1">
                         {['python', 'cpp', 'java', 'javascript'].map((langKey) => {
                           const hasSol = problem?.solutions && problem.solutions[langKey];
@@ -505,25 +492,25 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                             <button
                               key={langKey}
                               onClick={() => setSelectedSolLang(langKey)}
-                              className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                              className={`px-3 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1 ${
                                 selectedSolLang === langKey
-                                  ? 'bg-indigo-600 text-white shadow-sm'
-                                  : 'text-slate-400 hover:text-white'
+                                  ? 'bg-white text-[#FFA116] shadow-sm border border-[#E5E7EB]'
+                                  : 'text-[#64748B] hover:text-[#262626]'
                               }`}
                             >
                               <span>{label}</span>
-                              {hasSol && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                              {hasSol && <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]" />}
                             </button>
                           );
                         })}
                       </div>
 
                       {problem?.solutions && problem.solutions[selectedSolLang] && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleLoadSolutionIntoEditor(problem.solutions[selectedSolLang].code)}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold flex items-center gap-1 transition"
-                            title="Load solution into editor to run and test"
+                            className="px-2.5 py-1 rounded-md bg-[#FFF8EE] border border-[#FFA116]/30 text-[#FFA116] text-xs font-semibold flex items-center gap-1 hover:bg-[#FFA116] hover:text-white transition"
+                            title="Load solution into editor"
                           >
                             <ArrowRight className="w-3 h-3" />
                             <span>Load in Editor</span>
@@ -531,10 +518,10 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
                           <button
                             onClick={() => handleCopySolution(problem.solutions[selectedSolLang].code)}
-                            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                            className="p-1 rounded-md hover:bg-[#E5E7EB] text-[#64748B] transition"
                             title="Copy Code"
                           >
-                            {copiedSol ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                            {copiedSol ? <Check className="w-4 h-4 text-[#16A34A]" /> : <Copy className="w-4 h-4" />}
                           </button>
                         </div>
                       )}
@@ -542,35 +529,35 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
                     {/* Complexity Badges */}
                     {problem?.solutions && problem.solutions[selectedSolLang] && (
-                      <div className="flex items-center gap-3 bg-slate-900/50 p-2.5 rounded-xl border border-slate-800/80 text-xs">
+                      <div className="flex items-center gap-4 bg-[#F7F8FA] p-2.5 rounded-lg border border-[#E5E7EB] text-xs">
                         <div className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                          <span className="text-slate-400">Time Complexity:</span>
-                          <strong className="text-emerald-400 font-mono">{problem.solutions[selectedSolLang].time || 'O(N)'}</strong>
+                          <Clock className="w-3.5 h-3.5 text-[#FFA116]" />
+                          <span className="text-[#64748B]">Time:</span>
+                          <strong className="text-[#262626] font-mono">{problem.solutions[selectedSolLang].time || 'O(N)'}</strong>
                         </div>
-                        <div className="w-px h-4 bg-slate-800" />
+                        <div className="w-px h-4 bg-[#E5E7EB]" />
                         <div className="flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-purple-400" />
-                          <span className="text-slate-400">Space Complexity:</span>
-                          <strong className="text-indigo-400 font-mono">{problem.solutions[selectedSolLang].space || 'O(1)'}</strong>
+                          <Layers className="w-3.5 h-3.5 text-[#64748B]" />
+                          <span className="text-[#64748B]">Space:</span>
+                          <strong className="text-[#262626] font-mono">{problem.solutions[selectedSolLang].space || 'O(1)'}</strong>
                         </div>
                       </div>
                     )}
 
                     {/* Solution Code Display */}
                     {problem?.solutions && problem.solutions[selectedSolLang] ? (
-                      <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-inner">
-                        <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed whitespace-pre">
+                      <div className="rounded-lg border border-[#E5E7EB] bg-[#F7F8FA] overflow-hidden">
+                        <pre className="p-4 text-xs font-mono text-[#262626] overflow-x-auto leading-relaxed whitespace-pre">
                           <code>{problem.solutions[selectedSolLang].code}</code>
                         </pre>
                       </div>
                     ) : (
-                      <div className="p-8 text-center rounded-xl bg-slate-900/40 border border-slate-800 space-y-2">
-                        <Code2 className="w-8 h-8 text-slate-600 mx-auto" />
-                        <div className="text-xs font-semibold text-slate-300">
+                      <div className="p-8 text-center rounded-lg bg-[#F7F8FA] border border-[#E5E7EB] space-y-2">
+                        <Code2 className="w-8 h-8 text-[#94A3B8] mx-auto" />
+                        <div className="text-xs font-semibold text-[#262626]">
                           Solution in {selectedSolLang.toUpperCase()} will be rendered shortly.
                         </div>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-[11px] text-[#64748B]">
                           You can inspect the Python 3 or C++ verified optimal solutions above.
                         </p>
                       </div>
@@ -581,12 +568,12 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 {/* TAB 3: EDITORIAL */}
                 {activeLeftTab === 'editorial' && (
                   <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-purple-950/20 border border-purple-800/40 text-xs text-purple-200 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                      <span>Official Editorial & Algorithmic Breakdown</span>
+                    <div className="p-3.5 rounded-lg bg-[#FFF8EE] border border-[#FFA116]/20 text-xs text-[#FFA116] font-semibold flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-[#FFA116] shrink-0" />
+                      <span>Official Algorithmic Editorial Breakdown</span>
                     </div>
 
-                    <div className="prose prose-invert prose-xs max-w-none text-xs text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">
+                    <div className="text-xs text-[#262626] whitespace-pre-wrap font-sans leading-relaxed">
                       {problem.editorial}
                     </div>
                   </div>
@@ -596,12 +583,12 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 {activeLeftTab === 'hints' && (
                   <div className="space-y-3">
                     {(problem.hints || []).map((hint, idx) => (
-                      <div key={idx} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1.5">
-                        <div className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                      <div key={idx} className="p-3.5 rounded-lg bg-[#F7F8FA] border border-[#E5E7EB] space-y-1">
+                        <div className="text-xs font-bold text-[#FFA116] flex items-center gap-1.5">
                           <HelpCircle className="w-3.5 h-3.5" />
                           <span>Hint {idx + 1}</span>
                         </div>
-                        <p className="text-xs text-slate-300 leading-relaxed font-sans">{hint}</p>
+                        <p className="text-xs text-[#64748B] leading-relaxed font-sans">{hint}</p>
                       </div>
                     ))}
                   </div>
@@ -609,19 +596,17 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
               </div>
             </div>
 
-            {/* =========================================================
-                RIGHT PANEL: CODE EDITOR & INTERACTIVE RUNNER
-            ========================================================= */}
-            <div className="flex flex-col h-full overflow-hidden bg-slate-950">
+            {/* RIGHT PANEL: CODE EDITOR & RUNNER */}
+            <div className="flex flex-col h-full overflow-hidden bg-white">
               {/* Editor Header Toolbar */}
-              <div className="px-4 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between gap-3 flex-shrink-0">
+              <div className="px-4 py-2 bg-[#F7F8FA] border-b border-[#E5E7EB] flex items-center justify-between gap-3 shrink-0">
                 {/* Language Selector */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Language:</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[#64748B]">Language:</span>
                   <select
                     value={selectedLanguage}
                     onChange={(e) => handleLanguageChange(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-xs font-semibold text-slate-200 px-2.5 py-1 rounded-lg focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    className="bg-white border border-[#E5E7EB] text-xs font-semibold text-[#262626] px-2.5 py-1 rounded-md focus:outline-none focus:border-[#FFA116] cursor-pointer"
                   >
                     <option value="python">Python 3 (Runnable)</option>
                     <option value="javascript">JavaScript / Node (Runnable)</option>
@@ -630,11 +615,11 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                   </select>
                 </div>
 
-                {/* Editor Utility Actions */}
+                {/* Actions */}
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => initEditorCode(problem, selectedLanguage)}
-                    className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-semibold text-slate-400 hover:text-white transition flex items-center gap-1"
+                    className="px-2.5 py-1 rounded-md bg-white border border-[#E5E7EB] text-xs font-medium text-[#64748B] hover:text-[#262626] hover:bg-[#F7F8FA] transition flex items-center gap-1"
                     title="Reset to starter boilerplate"
                   >
                     <RotateCcw className="w-3 h-3" />
@@ -643,35 +628,35 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
                   <button
                     onClick={handleCopyEditorCode}
-                    className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
-                    title="Copy editor code"
+                    className="p-1 rounded-md hover:bg-[#E5E7EB] text-[#64748B] hover:text-[#262626] transition"
+                    title="Copy code"
                   >
-                    {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedCode ? <Check className="w-3.5 h-3.5 text-[#16A34A]" /> : <Copy className="w-3.5 h-3.5 text-[#64748B]" />}
                   </button>
                 </div>
               </div>
 
-              {/* Code Area */}
-              <div className="flex-1 relative flex flex-col min-h-0 bg-slate-950">
+              {/* Code Textarea Area */}
+              <div className="flex-1 relative flex flex-col min-h-0 bg-white">
                 <textarea
                   value={editorCode}
                   onChange={(e) => setEditorCode(e.target.value)}
                   onKeyDown={handleKeyDownInEditor}
                   placeholder="Write your solution here..."
                   spellCheck="false"
-                  className="w-full flex-1 p-4 bg-slate-950 text-slate-100 font-mono text-xs leading-relaxed resize-none focus:outline-none focus:ring-0 border-none select-text overflow-y-auto"
+                  className="w-full flex-1 p-4 bg-white text-[#262626] font-mono text-xs leading-relaxed resize-none focus:outline-none border-none select-text overflow-y-auto"
                 />
               </div>
 
               {/* Console & Test Case Runner Panel (Bottom of Editor) */}
-              <div className="border-t border-slate-800 bg-slate-900/90 flex flex-col flex-shrink-0 max-h-52">
+              <div className="border-t border-[#E5E7EB] bg-[#F7F8FA] flex flex-col shrink-0 max-h-52">
                 {/* Console Bar Tabs */}
-                <div className="px-4 py-1.5 bg-slate-900 border-b border-slate-800/80 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
+                <div className="px-4 py-1.5 bg-[#F7F8FA] border-b border-[#E5E7EB] flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={() => setActiveConsoleTab('output')}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold flex items-center gap-1 transition ${
-                        activeConsoleTab === 'output' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition ${
+                        activeConsoleTab === 'output' ? 'bg-white text-[#262626] shadow-sm border border-[#E5E7EB]' : 'text-[#64748B] hover:text-[#262626]'
                       }`}
                     >
                       <Terminal className="w-3 h-3" />
@@ -680,8 +665,8 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
                     <button
                       onClick={() => setActiveConsoleTab('input')}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                        activeConsoleTab === 'input' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                        activeConsoleTab === 'input' ? 'bg-white text-[#262626] shadow-sm border border-[#E5E7EB]' : 'text-[#64748B] hover:text-[#262626]'
                       }`}
                     >
                       <span>Custom Input</span>
@@ -691,16 +676,16 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                   {runResult && (
                     <div className="flex items-center gap-2">
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                           runResult.status === 'success'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                            ? 'bg-[#F0FDF4] text-[#16A34A] border border-[#16A34A]/20'
+                            : 'bg-[#FEF2F2] text-[#DC2626] border border-[#DC2626]/20'
                         }`}
                       >
-                        {runResult.status === 'success' ? 'Execution Finished' : 'Runtime Error'}
+                        {runResult.status === 'success' ? 'Finished' : 'Runtime Error'}
                       </span>
                       {runResult.execution_time_ms !== undefined && (
-                        <span className="text-[10px] text-slate-400 font-mono">
+                        <span className="text-[10px] text-[#64748B] font-mono">
                           {runResult.execution_time_ms} ms
                         </span>
                       )}
@@ -709,29 +694,29 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 </div>
 
                 {/* Console Content */}
-                <div className="p-3 bg-slate-950 font-mono text-xs overflow-y-auto min-h-20 max-h-36">
+                <div className="p-3 bg-white font-mono text-xs overflow-y-auto min-h-20 max-h-36">
                   {activeConsoleTab === 'output' ? (
                     <div>
                       {running ? (
-                        <div className="flex items-center gap-2 text-slate-400 py-1">
-                          <div className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                          <span>Executing code in sandboxed runner...</span>
+                        <div className="flex items-center gap-2 text-[#64748B] py-1">
+                          <div className="w-3 h-3 border-2 border-[#FFA116] border-t-transparent rounded-full animate-spin" />
+                          <span>Executing code in test runner...</span>
                         </div>
                       ) : runResult ? (
                         <div className="space-y-1">
                           {runResult.stdout && (
-                            <pre className="text-emerald-400 whitespace-pre-wrap">{runResult.stdout}</pre>
+                            <pre className="text-[#16A34A] whitespace-pre-wrap">{runResult.stdout}</pre>
                           )}
                           {runResult.stderr && (
-                            <pre className="text-rose-400 whitespace-pre-wrap">{runResult.stderr}</pre>
+                            <pre className="text-[#DC2626] whitespace-pre-wrap">{runResult.stderr}</pre>
                           )}
                           {!runResult.stdout && !runResult.stderr && (
-                            <span className="text-slate-500">Program executed successfully with no stdout output.</span>
+                            <span className="text-[#64748B]">Program executed successfully with no stdout output.</span>
                           )}
                         </div>
                       ) : (
-                        <div className="text-slate-500 flex items-center gap-2 py-1">
-                          <span>Click "Run Code" to execute code against standard test cases.</span>
+                        <div className="text-[#94A3B8] flex items-center gap-2 py-1">
+                          <span>Click "Run Code" to test against sample cases.</span>
                         </div>
                       )}
                     </div>
@@ -740,8 +725,8 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                       <textarea
                         value={customInput}
                         onChange={(e) => setCustomInput(e.target.value)}
-                        placeholder="Pass custom stdin or test inputs here..."
-                        className="w-full h-16 bg-transparent text-slate-200 font-mono text-xs focus:outline-none resize-none placeholder:text-slate-600"
+                        placeholder="Pass custom test inputs here..."
+                        className="w-full h-16 bg-transparent text-[#262626] font-mono text-xs focus:outline-none resize-none placeholder:text-[#94A3B8]"
                       />
                     </div>
                   )}
@@ -749,33 +734,36 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
               </div>
 
               {/* Action Buttons Toolbar */}
-              <div className="px-4 py-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-3 flex-shrink-0">
-                <button
+              <div className="px-4 py-3 bg-white border-t border-[#E5E7EB] flex items-center justify-between gap-3 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setActiveLeftTab('solutions')}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition border border-slate-700/60"
+                  icon={<Sparkles className="w-3.5 h-3.5 text-[#FFA116]" />}
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Peek Solution</span>
-                </button>
+                  Peek Solution
+                </Button>
 
                 <div className="flex items-center gap-2">
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={handleRunCode}
                     disabled={running}
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
+                    icon={<Play className="w-3.5 h-3.5 text-[#262626]" />}
                   >
-                    <Play className="w-3.5 h-3.5 fill-white" />
-                    <span>{running ? 'Running...' : 'Run Code'}</span>
-                  </button>
+                    {running ? 'Running...' : 'Run Code'}
+                  </Button>
 
-                  <button
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={handleSubmitSolution}
                     disabled={submitting}
-                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-lg shadow-emerald-600/25 disabled:opacity-50"
+                    icon={<CheckCircle className="w-3.5 h-3.5 text-white" />}
                   >
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    <span>{submitting ? 'Submitting...' : 'Submit (+25 XP)'}</span>
-                  </button>
+                    {submitting ? 'Submitting...' : 'Submit (+25 XP)'}
+                  </Button>
                 </div>
               </div>
             </div>

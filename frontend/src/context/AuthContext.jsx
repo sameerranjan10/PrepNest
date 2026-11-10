@@ -55,6 +55,17 @@ export const AuthProvider = ({ children }) => {
     fetchCurrentUser();
   }, [token]);
 
+  useEffect(() => {
+    const handleExpired = () => {
+      setUser(null);
+      setToken(null);
+      localStorage.removeItem('prepnest_token');
+      localStorage.removeItem('prepnest_user');
+    };
+    window.addEventListener('prepnest:auth-expired', handleExpired);
+    return () => window.removeEventListener('prepnest:auth-expired', handleExpired);
+  }, []);
+
   const login = (userData, accessToken) => {
     setUser(userData);
     setToken(accessToken);
@@ -88,34 +99,34 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (profileData) => {
     const savedToken = localStorage.getItem('prepnest_token') || token;
-    if (savedToken) {
-      try {
-        const res = await fetch(`${API_BASE}/api/user/profile`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${savedToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(profileData)
-        });
+    if (!savedToken) {
+      return { success: false, warning: 'You must be signed in to save profile changes.' };
+    }
 
-        if (res.ok) {
-          const updatedUser = await res.json();
-          setUser(updatedUser);
-          localStorage.setItem('prepnest_user', JSON.stringify(updatedUser));
-          return { success: true, user: updatedUser };
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || 'Failed to update profile on server');
+    try {
+      const res = await fetch(`${API_BASE}/api/user/profile`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${savedToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(profileData)
+      });
+
+      if (res.ok) {
+        const updatedUser = await res.json();
+        setUser(updatedUser);
+        localStorage.setItem('prepnest_user', JSON.stringify(updatedUser));
+        return { success: true, user: updatedUser };
+      } else {
+        if (res.status === 401) {
+          window.dispatchEvent(new CustomEvent('prepnest:auth-expired'));
         }
-      } catch (err) {
-        console.warn('Backend update failed, saving locally:', err.message);
-        updateUser(profileData);
-        return { success: true, user: { ...user, ...profileData }, warning: err.message };
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to update profile on server');
       }
-    } else {
-      updateUser(profileData);
-      return { success: true, user: { ...user, ...profileData } };
+    } catch (err) {
+      return { success: false, warning: err.message || 'Could not reach server to save profile.' };
     }
   };
 
@@ -145,6 +156,80 @@ export const AuthProvider = ({ children }) => {
     return await res.json();
   };
 
+  const uploadAvatar = async (fileBlob, fileName = 'avatar.webp') => {
+    const savedToken = localStorage.getItem('prepnest_token') || token;
+    if (!savedToken) {
+      return { success: false, error: 'You must be signed in to upload a profile picture.' };
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', fileBlob, fileName);
+
+      const res = await fetch(`${API_BASE}/api/user/avatar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${savedToken}`,
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          window.dispatchEvent(new CustomEvent('prepnest:auth-expired'));
+        }
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to upload profile picture');
+      }
+
+      const data = await res.json();
+      if (data.user) {
+        setUser(data.user);
+        localStorage.setItem('prepnest_user', JSON.stringify(data.user));
+      } else if (data.avatar_url !== undefined) {
+        updateUser({ avatar_url: data.avatar_url });
+      }
+      return { success: true, avatar_url: data.avatar_url, user: data.user };
+    } catch (err) {
+      return { success: false, error: err.message || 'Could not upload profile picture.' };
+    }
+  };
+
+  const removeAvatar = async () => {
+    const savedToken = localStorage.getItem('prepnest_token') || token;
+    if (!savedToken) {
+      return { success: false, error: 'You must be signed in to remove your profile picture.' };
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/user/avatar`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${savedToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          window.dispatchEvent(new CustomEvent('prepnest:auth-expired'));
+        }
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to remove profile picture');
+      }
+
+      const data = await res.json();
+      if (data.user) {
+        setUser(data.user);
+        localStorage.setItem('prepnest_user', JSON.stringify(data.user));
+      } else {
+        updateUser({ avatar_url: null });
+      }
+      return { success: true, user: data.user };
+    } catch (err) {
+      return { success: false, error: err.message || 'Could not remove profile picture.' };
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -156,7 +241,9 @@ export const AuthProvider = ({ children }) => {
         logout,
         updateUser,
         updateProfile,
-        changePassword
+        changePassword,
+        uploadAvatar,
+        removeAvatar,
       }}
     >
       {children}

@@ -181,13 +181,14 @@ def calculate_level(xp: int) -> Dict[str, Any]:
 
 def get_user_readiness(user_id: int, cursor) -> int:
     """
-    Deterministic placement readiness percentage (50% to 99%)
-    Formula:
-    Base: 50%
-    + DSA Solved: up to 25% (min(25, dsa_count * 2))
-    + Aptitude Quizzes: up to 12% (min(12, apt_count * 3))
-    + Mock Interviews: up to 8% (min(8, mock_count * 4))
-    + Daily Streak: up to 4% (min(4, streak))
+    Deterministic placement readiness percentage (0% to 100%)
+    Computed strictly from actual user activity in PostgreSQL:
+    - DSA Solved: up to 35% (min(35, dsa_count * 3))
+    - Aptitude Quizzes: up to 25% (min(25, apt_count * 5))
+    - Mock Interviews: up to 20% (min(20, mock_count * 10))
+    - Roadmap Topics: up to 15% (min(15, roadmap_count * 3))
+    - Daily Streak: up to 5% (min(5, streak))
+    Returns 0% when user has zero activity.
     """
     try:
         cursor.execute("SELECT COUNT(*) as c FROM user_dsa_progress WHERE user_id = %s AND is_solved = true;", (user_id,))
@@ -199,18 +200,22 @@ def get_user_readiness(user_id: int, cursor) -> int:
         cursor.execute("SELECT COUNT(*) as c FROM mock_interview_results WHERE user_id = %s;", (user_id,))
         mock_count = cursor.fetchone()["c"]
 
+        cursor.execute("SELECT COUNT(*) as c FROM user_roadmap_progress WHERE user_id = %s AND status = 'completed';", (user_id,))
+        roadmap_count = cursor.fetchone()["c"]
+
         streak = calculate_streak(user_id, cursor)
 
-        dsa_part = min(25, dsa_count * 2)
-        apt_part = min(12, apt_count * 3)
-        mock_part = min(8, mock_count * 4)
-        streak_part = min(4, streak)
+        dsa_part = min(35, dsa_count * 3)
+        apt_part = min(25, apt_count * 5)
+        mock_part = min(20, mock_count * 10)
+        roadmap_part = min(15, roadmap_count * 3)
+        streak_part = min(5, streak)
 
-        readiness = min(99, max(50, 50 + dsa_part + apt_part + mock_part + streak_part))
+        readiness = min(100, max(0, dsa_part + apt_part + mock_part + roadmap_part + streak_part))
         return int(readiness)
     except Exception as e:
         print(f"[WARN] get_user_readiness error: {e}")
-        return 75
+        return 0
 
 
 def award_xp(
@@ -401,6 +406,24 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             "created_at": r["created_at"].isoformat() if r["created_at"] else ""
         })
 
+    # Compute real per-user Aptitude average & Mock Interview average from DB
+    cursor.execute("SELECT COUNT(*) as total_dsa FROM dsa_problems;")
+    total_dsa = max(1, (cursor.fetchone() or {}).get("total_dsa", 1) or 1)
+
+    cursor.execute("""
+        SELECT user_id, ROUND(AVG(COALESCE(accuracy, score_percentage))::numeric, 0)::int AS avg_apt
+        FROM aptitude_test_results
+        GROUP BY user_id;
+    """)
+    apt_avg_map = {r["user_id"]: int(r["avg_apt"] or 0) for r in cursor.fetchall()}
+
+    cursor.execute("""
+        SELECT user_id, ROUND(AVG(score)::numeric, 0)::int AS avg_mock
+        FROM mock_interview_results
+        GROUP BY user_id;
+    """)
+    mock_avg_map = {r["user_id"]: int(r["avg_mock"] or 0) for r in cursor.fetchall()}
+
     rankings = []
     current_user_card = None
 
@@ -427,15 +450,15 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             badges.append("Active Learner")
         if u["problems_solved"] >= 20:
             badges.append("Problem Solver")
-        if not badges:
+        if not badges and u["period_xp"] > 0:
             badges.append("Rising Star")
 
         rank = idx + 1
         is_current = (uid == current_user_id)
 
-        dsa_metric = min(98, max(55, 50 + min(40, u["problems_solved"] * 3)))
-        apt_metric = min(95, max(60, 50 + min(40, streak * 4)))
-        interview_metric = min(96, max(50, readiness - 2))
+        dsa_metric = min(100, round((u["problems_solved"] / total_dsa) * 100, 1)) if u["problems_solved"] > 0 else 0
+        apt_metric = apt_avg_map.get(uid, 0)
+        interview_metric = mock_avg_map.get(uid, 0)
 
         user_item = {
             "id": uid,
@@ -445,6 +468,7 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             "email": u["email"],
             "username": u["email"].split("@")[0],
             "avatar": initials,
+            "avatar_url": u.get("avatar_url") or None,
             "role": u["target_role"] or "Software Engineer Aspirant",
             "xp": u["period_xp"],
             "level": level_info["level"],
@@ -469,7 +493,7 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
 
     # If current_user was not in list (edge case), synthesize from user table
     if not current_user_card and current_user_id:
-        cursor.execute("SELECT id, full_name, email, target_role FROM users WHERE id = %s;", (current_user_id,))
+        cursor.execute("SELECT id, full_name, email, target_role, avatar_url FROM users WHERE id = %s;", (current_user_id,))
         u = cursor.fetchone()
         if u:
             streak = calculate_streak(current_user_id, cursor)
@@ -485,6 +509,7 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
                 "email": u["email"],
                 "username": u["email"].split("@")[0],
                 "avatar": initials,
+                "avatar_url": u.get("avatar_url") or None,
                 "role": u["target_role"] or "Software Engineer Aspirant",
                 "xp": 0,
                 "level": level_info["level"],
@@ -494,10 +519,10 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
                 "problems": 0,
                 "streak": streak,
                 "readiness": readiness,
-                "dsa": 60,
-                "aptitude": 65,
-                "interview": 60,
-                "badges": ["Rising Star"],
+                "dsa": 0,
+                "aptitude": apt_avg_map.get(current_user_id, 0),
+                "interview": mock_avg_map.get(current_user_id, 0),
+                "badges": [],
                 "recent_activities": user_recent_map.get(current_user_id, []),
                 "is_current_user": True
             }
@@ -522,11 +547,12 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
 
 def seed_campus_cohort_if_needed(cursor):
     """
-    Ensures realistic campus cohort competition exists on Neon DB.
-    Seeds diverse activity so Weekly, Monthly, and Overall show rich, differentiated data.
+    Avoids seeding synthetic cohort users when real registered accounts already exist.
     """
     cursor.execute("SELECT COUNT(*) as count FROM users;")
     user_count = cursor.fetchone()["count"]
+    if user_count > 1:
+        return
 
     cohort_users = [
         ("alex.johnson@campus.edu", "Alex Johnson", "Full Stack Developer", [

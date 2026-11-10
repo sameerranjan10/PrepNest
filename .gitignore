@@ -25,6 +25,7 @@ backend/*.pyd
 backend/.pytest_cache/
 backend/venv/
 backend/env/
+backend/uploads/
 backend/*.db
 backend/*.sqlite3
 

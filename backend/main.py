@@ -1,10 +1,14 @@
 import os
+import re
 import sys
 import json
-from typing import List, Optional
+import secrets
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from auth import (
@@ -95,6 +99,7 @@ class UserProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     bio: Optional[str] = None
+    career_objective: Optional[str] = None
     location: Optional[str] = None
     avatar_url: Optional[str] = None
     target_role: Optional[str] = None
@@ -102,12 +107,15 @@ class UserProfileUpdate(BaseModel):
     skills: Optional[str] = None
     college: Optional[str] = None
     degree: Optional[str] = None
+    department: Optional[str] = None
     grad_year: Optional[int] = None
     current_semester: Optional[str] = None
     cgpa: Optional[str] = None
+    backlogs: Optional[str] = None
     tenth_percentage: Optional[str] = None
     twelfth_percentage: Optional[str] = None
     leetcode_username: Optional[str] = None
+    github_username: Optional[str] = None
     hackerrank_username: Optional[str] = None
     codechef_username: Optional[str] = None
     codeforces_username: Optional[str] = None
@@ -116,11 +124,19 @@ class UserProfileUpdate(BaseModel):
     linkedin_url: Optional[str] = None
     portfolio_url: Optional[str] = None
     resume_url: Optional[str] = None
+    other_links: Optional[str] = None
     preferred_language: Optional[str] = None
     daily_dsa_goal: Optional[int] = None
     daily_aptitude_goal: Optional[int] = None
+    daily_study_hours: Optional[float] = None
+    weekly_prep_goal: Optional[str] = None
+    prep_deadline: Optional[str] = None
+    preferred_subjects: Optional[str] = None
+    preferred_difficulty: Optional[str] = None
     prep_level: Optional[str] = None
     email_notifications: Optional[bool] = None
+    streak_reminders: Optional[bool] = None
+    weekly_digest: Optional[bool] = None
 
 
 class PasswordChangeRequest(BaseModel):
@@ -139,16 +155,31 @@ class AnswerItem(BaseModel):
 
 
 class SubmitTestRequest(BaseModel):
-    user_id: Optional[int] = 1
+    user_id: Optional[int] = None
+    assessment_id: Optional[int] = None
     category: str = "all"
     time_taken_seconds: int = 0
     answers: List[AnswerItem]
 
 
 class SingleSolveRequest(BaseModel):
-    user_id: Optional[int] = 1
+    user_id: Optional[int] = None
     question_id: int
     selected_option: str
+
+
+class GenerateAssessmentRequest(BaseModel):
+    category: str = "all"
+    difficulty: str = "all"
+    company: str = "all"
+    subtopic: str = "all"
+    limit: int = 10
+    timer_mode: str = "standard"
+
+
+class SaveAssessmentProgressRequest(BaseModel):
+    saved_answers: dict = {}
+    marked_review: dict = {}
 
 
 class DSAToggleSolvedRequest(BaseModel):
@@ -241,15 +272,15 @@ def register_user(user_data: UserRegister, origin: Optional[str] = Header(None))
 
     # 2. Synchronize with public.users table
     try:
-        cursor.execute("SELECT id, email, full_name, plan, credits, created_at FROM users WHERE email = %s", (email,))
+        cursor.execute(f"SELECT {USER_PROFILE_SELECT_COLS} FROM users WHERE email = %s", (email,))
         existing = cursor.fetchone()
         hashed = hash_password(user_data.password)
 
         if not existing:
-            cursor.execute("""
+            cursor.execute(f"""
                 INSERT INTO users (email, full_name, hashed_password, plan, credits)
                 VALUES (%s, %s, %s, 'Pro', 250)
-                RETURNING id, email, full_name, plan, credits, created_at;
+                RETURNING {USER_PROFILE_SELECT_COLS};
             """, (email, full_name, hashed))
             user_row = cursor.fetchone()
         else:
@@ -266,6 +297,7 @@ def register_user(user_data: UserRegister, origin: Optional[str] = Header(None))
     conn.close()
 
     user = dict(user_row)
+    user.pop("hashed_password", None)
     if user.get("created_at"):
         user["created_at"] = str(user["created_at"])
 
@@ -276,6 +308,54 @@ def register_user(user_data: UserRegister, origin: Optional[str] = Header(None))
         "token_type": "bearer",
         "user": user
     }
+
+
+# -------------------------------------------------------------
+
+AVATAR_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "avatars"
+AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_AVATAR_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SAFE_AVATAR_FILENAME_RE = re.compile(r"^avatar_\d+_[a-f0-9]+\.(jpg|jpeg|png|webp)$")
+
+USER_PROFILE_SELECT_COLS = """
+    id, email, full_name, plan, credits, phone, bio, career_objective, location,
+    avatar_url, target_role, target_companies, skills, college,
+    degree, department, grad_year, current_semester, cgpa, backlogs,
+    tenth_percentage, twelfth_percentage, leetcode_username, github_username,
+    hackerrank_username, codechef_username, codeforces_username, gfg_username,
+    github_url, linkedin_url, portfolio_url, resume_url, other_links,
+    preferred_language, daily_dsa_goal, daily_aptitude_goal, daily_study_hours,
+    weekly_prep_goal, prep_deadline, preferred_subjects, preferred_difficulty,
+    prep_level, email_notifications, streak_reminders, weekly_digest, created_at
+"""
+
+
+def _detect_image_type(data: bytes) -> Optional[tuple]:
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return ("jpg", "image/jpeg")
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ("png", "image/png")
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("webp", "image/webp")
+    return None
+
+
+def _safe_remove_local_avatar(avatar_url: Optional[str]) -> None:
+    if not avatar_url or not isinstance(avatar_url, str):
+        return
+    prefix = "/api/media/avatars/"
+    if not avatar_url.startswith(prefix):
+        return
+    filename = avatar_url[len(prefix):].split("?")[0].strip()
+    if not SAFE_AVATAR_FILENAME_RE.match(filename):
+        return
+    target = (AVATAR_UPLOAD_DIR / filename).resolve()
+    try:
+        if target.parent == AVATAR_UPLOAD_DIR.resolve() and target.is_file():
+            target.unlink()
+    except Exception:
+        pass
 
 
 # -------------------------------------------------------------
@@ -333,6 +413,7 @@ def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
         conn.close()
 
     user = dict(user_row)
+    user.pop("hashed_password", None)
     if user.get("created_at"):
         user["created_at"] = str(user["created_at"])
 
@@ -343,6 +424,54 @@ def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
         "token_type": "bearer",
         "user": user
     }
+
+
+# -------------------------------------------------------------
+
+AVATAR_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "avatars"
+AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_AVATAR_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SAFE_AVATAR_FILENAME_RE = re.compile(r"^avatar_\d+_[a-f0-9]+\.(jpg|jpeg|png|webp)$")
+
+USER_PROFILE_SELECT_COLS = """
+    id, email, full_name, plan, credits, phone, bio, career_objective, location,
+    avatar_url, target_role, target_companies, skills, college,
+    degree, department, grad_year, current_semester, cgpa, backlogs,
+    tenth_percentage, twelfth_percentage, leetcode_username, github_username,
+    hackerrank_username, codechef_username, codeforces_username, gfg_username,
+    github_url, linkedin_url, portfolio_url, resume_url, other_links,
+    preferred_language, daily_dsa_goal, daily_aptitude_goal, daily_study_hours,
+    weekly_prep_goal, prep_deadline, preferred_subjects, preferred_difficulty,
+    prep_level, email_notifications, streak_reminders, weekly_digest, created_at
+"""
+
+
+def _detect_image_type(data: bytes) -> Optional[tuple]:
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return ("jpg", "image/jpeg")
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ("png", "image/png")
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ("webp", "image/webp")
+    return None
+
+
+def _safe_remove_local_avatar(avatar_url: Optional[str]) -> None:
+    if not avatar_url or not isinstance(avatar_url, str):
+        return
+    prefix = "/api/media/avatars/"
+    if not avatar_url.startswith(prefix):
+        return
+    filename = avatar_url[len(prefix):].split("?")[0].strip()
+    if not SAFE_AVATAR_FILENAME_RE.match(filename):
+        return
+    target = (AVATAR_UPLOAD_DIR / filename).resolve()
+    try:
+        if target.parent == AVATAR_UPLOAD_DIR.resolve() and target.is_file():
+            target.unlink()
+    except Exception:
+        pass
 
 
 # -------------------------------------------------------------
@@ -398,15 +527,8 @@ def get_current_user_from_token(authorization: Optional[str]):
 
         # 3. Retrieve user from public.users
         cursor.execute(
-            """
-            SELECT id, email, full_name, plan, credits, phone, bio, location, 
-                   avatar_url, target_role, target_companies, skills, college, 
-                   degree, grad_year, current_semester, cgpa, tenth_percentage, 
-                   twelfth_percentage, leetcode_username, hackerrank_username, 
-                   codechef_username, codeforces_username, gfg_username, 
-                   github_url, linkedin_url, portfolio_url, resume_url, 
-                   preferred_language, daily_dsa_goal, daily_aptitude_goal, 
-                   prep_level, email_notifications, created_at
+            f"""
+            SELECT {USER_PROFILE_SELECT_COLS}
             FROM users
             WHERE email = %s
             """,
@@ -416,15 +538,19 @@ def get_current_user_from_token(authorization: Optional[str]):
 
         if not row:
             name = neon_sess.get("name") if neon_sess else "User"
-            cursor.execute("""
-                INSERT INTO users (email, full_name, plan, credits)
-                VALUES (%s, %s, 'Pro', 250)
-                RETURNING *;
-            """, (email, name))
+            cursor.execute(
+                f"""
+                INSERT INTO users (email, full_name, hashed_password, plan, credits)
+                VALUES (%s, %s, '', 'Pro', 250)
+                RETURNING {USER_PROFILE_SELECT_COLS};
+                """,
+                (email, name),
+            )
             row = cursor.fetchone()
             conn.commit()
 
         user_dict = dict(row)
+        user_dict.pop("hashed_password", None)
         if user_dict.get("created_at"):
             user_dict["created_at"] = str(user_dict["created_at"])
 
@@ -432,6 +558,16 @@ def get_current_user_from_token(authorization: Optional[str]):
     finally:
         cursor.close()
         conn.close()
+
+
+def resolve_aptitude_user_id(
+    authorization: Optional[str],
+    fallback_user_id: Optional[int] = None
+) -> int:
+    if authorization and authorization.startswith("Bearer "):
+        user = get_current_user_from_token(authorization)
+        return int(user["id"])
+    return int(fallback_user_id or 1)
 
 
 
@@ -466,8 +602,13 @@ def update_user_profile(
         return current_user
 
     for field, val in data_dict.items():
+        if field not in UserProfileUpdate.model_fields:
+            continue
         update_fields.append(f"{field} = %s")
         values.append(val)
+
+    if not update_fields:
+        return current_user
 
     values.append(user_id)
 
@@ -480,14 +621,7 @@ def update_user_profile(
             UPDATE users
             SET {set_clause}
             WHERE id = %s
-            RETURNING id, email, full_name, plan, credits, phone, bio, location, 
-                      avatar_url, target_role, target_companies, skills, college, 
-                      degree, grad_year, current_semester, cgpa, tenth_percentage, 
-                      twelfth_percentage, leetcode_username, hackerrank_username, 
-                      codechef_username, codeforces_username, gfg_username, 
-                      github_url, linkedin_url, portfolio_url, resume_url, 
-                      preferred_language, daily_dsa_goal, daily_aptitude_goal, 
-                      prep_level, email_notifications, created_at
+            RETURNING {USER_PROFILE_SELECT_COLS}
         """
         cursor.execute(query, tuple(values))
         updated_row = cursor.fetchone()
@@ -507,6 +641,150 @@ def update_user_profile(
         updated_user["created_at"] = str(updated_user["created_at"])
 
     return updated_user
+
+
+@app.post("/api/user/avatar")
+async def upload_user_avatar(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    current_user = get_current_user_from_token(authorization)
+    user_id = current_user["id"]
+
+    orig_name = (file.filename or "").lower()
+    ext = Path(orig_name).suffix
+    if ext and ext not in ALLOWED_AVATAR_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file format. Please upload a JPG, JPEG, PNG, or WebP image.",
+        )
+
+    raw_bytes = await file.read(AVATAR_MAX_BYTES + 1)
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded image file is empty.")
+    if len(raw_bytes) > AVATAR_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Image size exceeds the 5 MB maximum limit.",
+        )
+
+    detected = _detect_image_type(raw_bytes)
+    if not detected:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image content. Only valid JPG, JPEG, PNG, or WebP images are allowed.",
+        )
+
+    safe_ext, _mime = detected
+    filename = f"avatar_{user_id}_{secrets.token_hex(12)}.{safe_ext}"
+    dest_path = (AVATAR_UPLOAD_DIR / filename).resolve()
+    if dest_path.parent != AVATAR_UPLOAD_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Invalid upload path.")
+
+    dest_path.write_bytes(raw_bytes)
+    new_avatar_url = f"/api/media/avatars/{filename}"
+    old_avatar_url = current_user.get("avatar_url")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            f"""
+            UPDATE users
+            SET avatar_url = %s
+            WHERE id = %s
+            RETURNING {USER_PROFILE_SELECT_COLS};
+            """,
+            (new_avatar_url, user_id),
+        )
+        updated_row = cursor.fetchone()
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        if dest_path.is_file():
+            dest_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Failed to save avatar URL: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+    _safe_remove_local_avatar(old_avatar_url)
+
+    updated_user = dict(updated_row)
+    if updated_user.get("created_at"):
+        updated_user["created_at"] = str(updated_user["created_at"])
+
+    return {
+        "status": "ok",
+        "avatar_url": new_avatar_url,
+        "user": updated_user,
+    }
+
+
+@app.delete("/api/user/avatar")
+def delete_user_avatar(authorization: Optional[str] = Header(None)):
+    current_user = get_current_user_from_token(authorization)
+    user_id = current_user["id"]
+    old_avatar_url = current_user.get("avatar_url")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            f"""
+            UPDATE users
+            SET avatar_url = NULL
+            WHERE id = %s
+            RETURNING {USER_PROFILE_SELECT_COLS};
+            """,
+            (user_id,),
+        )
+        updated_row = cursor.fetchone()
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to remove avatar: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+    _safe_remove_local_avatar(old_avatar_url)
+
+    updated_user = dict(updated_row)
+    if updated_user.get("created_at"):
+        updated_user["created_at"] = str(updated_user["created_at"])
+
+    return {
+        "status": "ok",
+        "avatar_url": None,
+        "user": updated_user,
+    }
+
+
+@app.get("/api/media/avatars/{filename}")
+def get_user_avatar_file(filename: str):
+    if not SAFE_AVATAR_FILENAME_RE.match(filename):
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    file_path = (AVATAR_UPLOAD_DIR / filename).resolve()
+    if file_path.parent != AVATAR_UPLOAD_DIR.resolve() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Avatar not found")
+
+    ext = file_path.suffix.lower()
+    media_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+    media_type = media_map.get(ext, "application/octet-stream")
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
 
 
 @app.put("/api/user/password")
@@ -551,6 +829,44 @@ def change_user_password(
     return {"status": "ok", "message": "Password updated successfully"}
 
 
+@app.get("/api/user/header-stats")
+def get_user_header_stats(
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Returns real-time user streak, XP, credits, plan, and total DSA problem count for global Header & Sidebar.
+    """
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, plan, credits, total_xp FROM users WHERE id = %s;",
+            (uid,)
+        )
+        u = cursor.fetchone()
+        streak = calculate_streak(uid, cursor)
+
+        cursor.execute("SELECT COUNT(*) AS total FROM dsa_problems;")
+        dsa_total = (cursor.fetchone() or {}).get("total", 0) or 0
+
+        cursor.execute("SELECT COUNT(*) AS total FROM aptitude_questions;")
+        aptitude_total = (cursor.fetchone() or {}).get("total", 0) or 0
+
+        return {
+            "user_id": uid,
+            "streak": streak,
+            "total_xp": int((u or {}).get("total_xp") or 0),
+            "credits": int((u or {}).get("credits") if (u and u.get("credits") is not None) else 0),
+            "plan": (u or {}).get("plan") or "Free",
+            "dsa_total": int(dsa_total),
+            "aptitude_total": int(aptitude_total),
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
 
 # =============================================================
 # APTITUDE PRACTICE MODULE
@@ -560,117 +876,173 @@ def change_user_password(
 # Aptitude Categories
 # -------------------------------------------------------------
 
+APTITUDE_CATEGORY_META = {
+    "quantitative": {
+        "name": "Quantitative Aptitude",
+        "code": "QA",
+        "description": (
+            "Master numerical analysis, arithmetic, algebra, "
+            "probability, and speed math for campus recruitment exams."
+        ),
+        "color": "indigo",
+        "badge": "Numerical & Math",
+    },
+    "logical": {
+        "name": "Logical Reasoning",
+        "code": "LR",
+        "description": (
+            "Sharpen analytical thinking, syllogisms, blood relations, "
+            "pattern recognition, and puzzle solving."
+        ),
+        "color": "purple",
+        "badge": "Analytical Logic",
+    },
+    "verbal": {
+        "name": "Verbal Ability",
+        "code": "VA",
+        "description": (
+            "Excel in reading comprehension, grammar correction, "
+            "para-jumbles, vocabulary, and verbal analogies."
+        ),
+        "color": "pink",
+        "badge": "Grammar & Vocab",
+    },
+}
+
+
 @app.get("/api/aptitude/categories")
-def get_aptitude_categories():
+def get_aptitude_categories(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    categories = [
-        {
-            "id": "quantitative",
-            "name": "Quantitative Aptitude",
-            "code": "QA",
-            "description": (
-                "Master numerical analysis, arithmetic, algebra, "
-                "probability, and speed math for campus recruitment exams."
-            ),
-            "color": "indigo",
-            "badge": "Numerical & Math"
-        },
-        {
-            "id": "logical",
-            "name": "Logical Reasoning",
-            "code": "LR",
-            "description": (
-                "Sharpen analytical thinking, syllogisms, blood relations, "
-                "pattern recognition, and puzzle solving."
-            ),
-            "color": "purple",
-            "badge": "Analytical Logic"
-        },
-        {
-            "id": "verbal",
-            "name": "Verbal Ability",
-            "code": "VA",
-            "description": (
-                "Excel in reading comprehension, grammar correction, "
-                "para-jumbles, vocabulary, and verbal analogies."
-            ),
-            "color": "pink",
-            "badge": "Grammar & Vocab"
-        }
-    ]
-
     try:
-        for cat in categories:
-            # Total questions
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS cnt
-                FROM aptitude_questions
-                WHERE category = %s
-                """,
-                (cat["id"],)
-            )
-            result = cursor.fetchone()
-            cat["total_questions"] = result["cnt"]
+        # Discover actual categories present in database alongside user-specific progress
+        cursor.execute(
+            """
+            SELECT
+                q.category,
+                COUNT(q.id) AS total_questions,
+                COUNT(CASE WHEN p.status = 'solved' THEN 1 END) AS solved_questions
+            FROM aptitude_questions q
+            LEFT JOIN user_question_progress p
+                ON q.id = p.question_id AND p.user_id = %s
+            GROUP BY q.category
+            ORDER BY CASE q.category
+                WHEN 'quantitative' THEN 1
+                WHEN 'logical' THEN 2
+                WHEN 'verbal' THEN 3
+                ELSE 4
+            END, q.category ASC
+            """,
+            (uid,),
+        )
+        cat_rows = cursor.fetchall()
 
-            # Subtopics
+        categories = []
+        for r in cat_rows:
+            cid = r["category"]
+            total_q = int(r["total_questions"] or 0)
+            solved_q = int(r["solved_questions"] or 0)
+            unsolved_q = max(0, total_q - solved_q)
+            completion_pct = round((solved_q / total_q) * 100, 1) if total_q > 0 else 0.0
+
             cursor.execute(
                 """
                 SELECT DISTINCT subtopic
                 FROM aptitude_questions
-                WHERE category = %s
+                WHERE category = %s AND subtopic IS NOT NULL AND subtopic != ''
+                ORDER BY subtopic ASC
                 """,
-                (cat["id"],)
+                (cid,),
             )
-            cat["subtopics"] = [
-                row["subtopic"]
-                for row in cursor.fetchall()
-            ]
+            subtopics = [row["subtopic"] for row in cursor.fetchall()]
 
-            # Test statistics
             cursor.execute(
                 """
                 SELECT
                     COUNT(*) AS test_count,
                     AVG(score_percentage) AS avg_score
                 FROM aptitude_test_results
-                WHERE category = %s
+                WHERE user_id = %s AND category = %s
                 """,
-                (cat["id"],)
+                (uid, cid),
             )
             stats = cursor.fetchone()
 
-            cat["tests_completed"] = (
-                stats["test_count"] or 0
+            meta_info = APTITUDE_CATEGORY_META.get(
+                cid,
+                {
+                    "name": cid.replace("_", " ").title(),
+                    "code": cid[:2].upper(),
+                    "description": f"Practice questions and timed drills for {cid}.",
+                    "color": "amber",
+                    "badge": "Aptitude",
+                },
             )
 
-            cat["avg_score"] = (
-                round(stats["avg_score"], 1)
-                if stats["avg_score"] is not None
-                else 0.0
+            categories.append(
+                {
+                    "id": cid,
+                    "name": meta_info["name"],
+                    "code": meta_info["code"],
+                    "description": meta_info["description"],
+                    "color": meta_info["color"],
+                    "badge": meta_info["badge"],
+                    "total_questions": total_q,
+                    "solved_questions": solved_q,
+                    "unsolved_questions": unsolved_q,
+                    "completion_percentage": completion_pct,
+                    "subtopics": subtopics,
+                    "tests_completed": int(stats["test_count"] or 0),
+                    "avg_score": (
+                        round(stats["avg_score"], 1)
+                        if stats["avg_score"] is not None
+                        else 0.0
+                    ),
+                }
             )
 
-        # Global statistics
+        # User-specific overall statistics from real records
+        cursor.execute("SELECT COUNT(*) AS total FROM aptitude_questions")
+        bank_total = int(cursor.fetchone()["total"] or 0)
+
         cursor.execute(
             """
             SELECT
-                COUNT(*) AS total_tests,
-                AVG(score_percentage) AS overall_avg
-            FROM aptitude_test_results
-            """
+                COUNT(*) FILTER (WHERE status = 'solved') AS solved_count,
+                COUNT(*) FILTER (WHERE status IN ('solved', 'incorrect')) AS evaluated_attempts,
+                COUNT(*) FILTER (WHERE is_starred = TRUE) AS starred_count
+            FROM user_question_progress
+            WHERE user_id = %s
+            """,
+            (uid,),
         )
-        overall = cursor.fetchone()
-
-        total_tests = overall["total_tests"] or 0
+        prog = cursor.fetchone()
+        solved_total = int(prog["solved_count"] or 0)
+        evaluated_attempts = int(prog["evaluated_attempts"] or 0)
+        starred_total = int(prog["starred_count"] or 0)
         overall_accuracy = (
-            round(overall["overall_avg"], 1)
-            if overall["overall_avg"] is not None
+            round((solved_total / evaluated_attempts) * 100, 1)
+            if evaluated_attempts > 0
             else 0.0
         )
 
-        # Company tags
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total_tests
+            FROM aptitude_test_results
+            WHERE user_id = %s
+            """,
+            (uid,),
+        )
+        total_tests = int(cursor.fetchone()["total_tests"] or 0)
+        current_streak = calculate_streak(uid, cursor)
+
+        # Distinct company tags from DB
         cursor.execute(
             """
             SELECT DISTINCT company_tag
@@ -679,8 +1051,7 @@ def get_aptitude_categories():
             ORDER BY company_tag
             """
         )
-        company_rows = cursor.fetchall()
-        companies_list = [row["company_tag"] for row in company_rows]
+        companies_list = [row["company_tag"] for row in cursor.fetchall()]
 
     finally:
         cursor.close()
@@ -690,20 +1061,20 @@ def get_aptitude_categories():
         "categories": categories,
         "companies": companies_list,
         "overall_stats": {
+            "total_questions": bank_total,
+            "solved_questions": solved_total,
+            "unsolved_questions": max(0, bank_total - solved_total),
+            "starred_questions": starred_total,
+            "evaluated_attempts": evaluated_attempts,
             "total_tests_completed": total_tests,
             "overall_accuracy": overall_accuracy,
-            "placement_readiness_boost": min(
-                100,
-                int(overall_accuracy * 0.85)
-                if total_tests > 0
-                else 75
-            )
-        }
+            "current_streak": current_streak,
+        },
     }
 
 
 # -------------------------------------------------------------
-# Get Aptitude Questions
+# Get Aptitude Questions (Active Test - Answers Stripped)
 # -------------------------------------------------------------
 
 @app.get("/api/aptitude/questions")
@@ -712,7 +1083,7 @@ def get_aptitude_questions(
     difficulty: Optional[str] = "all",
     company: Optional[str] = "all",
     subtopic: Optional[str] = None,
-    limit: Optional[int] = 10
+    limit: Optional[int] = 10,
 ):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -728,9 +1099,7 @@ def get_aptitude_questions(
             option_a,
             option_b,
             option_c,
-            option_d,
-            correct_option,
-            explanation
+            option_d
         FROM aptitude_questions
         WHERE 1=1
     """
@@ -763,61 +1132,100 @@ def get_aptitude_questions(
         cursor.close()
         conn.close()
 
-    questions = []
-    for r in rows:
-        questions.append(
-            {
-                "id": r["id"],
-                "category": r["category"],
-                "subtopic": r["subtopic"],
-                "difficulty": r["difficulty"],
-                "company_tag": r["company_tag"] or "General",
-                "question_text": r["question_text"],
-                "options": {
-                    "A": r["option_a"],
-                    "B": r["option_b"],
-                    "C": r["option_c"],
-                    "D": r["option_d"]
-                },
-                "correct_option": r["correct_option"],
-                "explanation": r["explanation"]
-            }
-        )
+    questions = [
+        {
+            "id": r["id"],
+            "category": r["category"],
+            "subtopic": r["subtopic"],
+            "difficulty": r["difficulty"],
+            "company_tag": r["company_tag"] or "General",
+            "question_text": r["question_text"],
+            "options": {
+                "A": r["option_a"],
+                "B": r["option_b"],
+                "C": r["option_c"],
+                "D": r["option_d"],
+            },
+        }
+        for r in rows
+    ]
 
     return {
         "count": len(questions),
         "category": category,
         "company": company,
-        "questions": questions
+        "questions": questions,
     }
 
 
 # -------------------------------------------------------------
-# Submit Aptitude Test
+# Shared Assessment Evaluation & Persistence Helper
 # -------------------------------------------------------------
 
-@app.post("/api/aptitude/submit")
-def submit_aptitude_test(
-    payload: SubmitTestRequest
+def _evaluate_and_save_assessment(
+    uid: int,
+    category: str,
+    time_taken_seconds: int,
+    answers: List[AnswerItem],
+    assessment_id: Optional[int] = None,
 ):
-    if not payload.answers:
+    if not answers:
         raise HTTPException(
             status_code=400,
-            detail="No answers provided in test submission"
+            detail="No answers provided in test submission",
         )
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        question_ids = [
-            answer.question_id
-            for answer in payload.answers
-        ]
+        if assessment_id is not None:
+            cursor.execute(
+                "SELECT id, status FROM aptitude_assessments WHERE id = %s AND user_id = %s",
+                (assessment_id, uid),
+            )
+            ass_row = cursor.fetchone()
+            if not ass_row:
+                raise HTTPException(status_code=404, detail="Assessment session not found")
+            if ass_row["status"] == "submitted":
+                cursor.execute(
+                    "SELECT * FROM aptitude_test_results WHERE assessment_id = %s AND user_id = %s ORDER BY id DESC LIMIT 1",
+                    (assessment_id, uid),
+                )
+                existing_res = cursor.fetchone()
+                if existing_res:
+                    parsed = {}
+                    try:
+                        parsed = json.loads(existing_res["answers_json"] or "{}")
+                    except Exception:
+                        parsed = {}
+                    det = parsed.get("detailed_results", [])
+                    att = existing_res["total_questions"] - existing_res["unattempted"]
+                    return {
+                        "result_id": existing_res["id"],
+                        "assessment_id": assessment_id,
+                        "category": existing_res["category"],
+                        "total_questions": existing_res["total_questions"],
+                        "attempted_questions": att,
+                        "correct_answers": existing_res["correct_answers"],
+                        "incorrect_answers": existing_res["incorrect_answers"],
+                        "unattempted": existing_res["unattempted"],
+                        "score_percentage": existing_res["score_percentage"],
+                        "accuracy": existing_res.get("accuracy")
+                        if existing_res.get("accuracy") is not None
+                        else (
+                            round((existing_res["correct_answers"] / att) * 100, 1)
+                            if att > 0
+                            else 0.0
+                        ),
+                        "time_taken_seconds": existing_res["time_taken_seconds"],
+                        "xp_earned": 0,
+                        "category_breakdown": parsed.get("category_scores", {}),
+                        "detailed_results": det,
+                    }
 
-        placeholders = ",".join(
-            ["%s"] * len(question_ids)
-        )
+        question_ids = [answer.question_id for answer in answers]
+        placeholders = ",".join(["%s"] * len(question_ids))
 
         cursor.execute(
             f"""
@@ -825,41 +1233,31 @@ def submit_aptitude_test(
             FROM aptitude_questions
             WHERE id IN ({placeholders})
             """,
-            tuple(question_ids)
+            tuple(question_ids),
         )
 
-        db_questions = {
-            row["id"]: dict(row)
-            for row in cursor.fetchall()
-        }
+        db_questions = {row["id"]: dict(row) for row in cursor.fetchall()}
 
-        total_questions = len(payload.answers)
+        total_questions = len(answers)
         correct_count = 0
         incorrect_count = 0
         unattempted_count = 0
         detailed_results = []
         category_scores = {}
 
-        for ans in payload.answers:
+        for ans in answers:
             qid = ans.question_id
-            selected = (
-                ans.selected_option.upper()
-                if ans.selected_option
-                else None
-            )
+            selected = ans.selected_option.upper().strip() if ans.selected_option else None
 
             q_data = db_questions.get(qid)
             if not q_data:
                 continue
 
-            correct = q_data["correct_option"].upper()
+            correct = q_data["correct_option"].upper().strip()
             cat = q_data["category"]
 
             if cat not in category_scores:
-                category_scores[cat] = {
-                    "total": 0,
-                    "correct": 0
-                }
+                category_scores[cat] = {"total": 0, "correct": 0, "incorrect": 0, "unattempted": 0}
 
             category_scores[cat]["total"] += 1
             is_correct = False
@@ -868,12 +1266,14 @@ def submit_aptitude_test(
             if not selected:
                 is_unattempted = True
                 unattempted_count += 1
+                category_scores[cat]["unattempted"] += 1
             elif selected == correct:
                 is_correct = True
                 correct_count += 1
                 category_scores[cat]["correct"] += 1
             else:
                 incorrect_count += 1
+                category_scores[cat]["incorrect"] += 1
 
             detailed_results.append(
                 {
@@ -886,34 +1286,25 @@ def submit_aptitude_test(
                         "A": q_data["option_a"],
                         "B": q_data["option_b"],
                         "C": q_data["option_c"],
-                        "D": q_data["option_d"]
+                        "D": q_data["option_d"],
                     },
                     "selected_option": selected,
                     "correct_option": correct,
                     "is_correct": is_correct,
                     "is_unattempted": is_unattempted,
-                    "explanation": q_data["explanation"]
+                    "explanation": q_data["explanation"],
                 }
             )
 
         score_percentage = (
-            round(
-                (correct_count / total_questions) * 100,
-                1
-            )
+            round((correct_count / total_questions) * 100, 1)
             if total_questions > 0
             else 0.0
         )
 
-        attempted = (
-            total_questions - unattempted_count
-        )
-
+        attempted = total_questions - unattempted_count
         accuracy = (
-            round(
-                (correct_count / attempted) * 100,
-                1
-            )
+            round((correct_count / attempted) * 100, 1)
             if attempted > 0
             else 0.0
         )
@@ -921,107 +1312,143 @@ def submit_aptitude_test(
         answers_payload = json.dumps(
             {
                 "detailed_results": detailed_results,
-                "category_scores": category_scores
+                "category_scores": category_scores,
             }
         )
 
-        # PostgreSQL INSERT with RETURNING
         cursor.execute(
             """
             INSERT INTO aptitude_test_results
             (
                 user_id,
+                assessment_id,
                 category,
                 total_questions,
                 correct_answers,
                 incorrect_answers,
                 unattempted,
                 score_percentage,
+                accuracy,
                 time_taken_seconds,
                 answers_json
             )
-            VALUES
-            (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s
-            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
-                payload.user_id or 1,
-                payload.category,
+                uid,
+                assessment_id,
+                category,
                 total_questions,
                 correct_count,
                 incorrect_count,
                 unattempted_count,
                 score_percentage,
-                payload.time_taken_seconds,
-                answers_payload
-            )
+                accuracy,
+                time_taken_seconds,
+                answers_payload,
+            ),
         )
 
         result_id = cursor.fetchone()["id"]
 
-        # Track question-level progress for user
-        user_id = payload.user_id or 1
+        if assessment_id is not None:
+            saved_map = {
+                str(a.question_id): a.selected_option.upper().strip()
+                for a in answers
+                if a.selected_option
+            }
+            cursor.execute(
+                """
+                UPDATE aptitude_assessments
+                SET status = 'submitted',
+                    saved_answers = %s::jsonb,
+                    submitted_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND user_id = %s
+                """,
+                (json.dumps(saved_map), assessment_id, uid),
+            )
+
         for res_item in detailed_results:
             if not res_item.get("is_unattempted"):
                 q_status = "solved" if res_item.get("is_correct") else "incorrect"
                 cursor.execute(
                     """
-                    INSERT INTO user_question_progress 
+                    INSERT INTO user_question_progress
                     (user_id, question_id, status, selected_option, updated_at)
                     VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
                     ON CONFLICT (user_id, question_id)
-                    DO UPDATE SET status = EXCLUDED.status, selected_option = EXCLUDED.selected_option, updated_at = CURRENT_TIMESTAMP
+                    DO UPDATE SET
+                        status = CASE
+                            WHEN user_question_progress.status = 'solved' THEN 'solved'
+                            ELSE EXCLUDED.status
+                        END,
+                        selected_option = EXCLUDED.selected_option,
+                        updated_at = CURRENT_TIMESTAMP
                     """,
-                    (user_id, res_item["id"], q_status, res_item.get("selected_option"))
+                    (uid, res_item["id"], q_status, res_item.get("selected_option")),
                 )
 
-        # Award central XP (Module 9 Requirement: Aptitude Quiz +30 XP)
         xp_res = award_xp(
-            user_id=user_id,
+            user_id=uid,
             activity_type="aptitude_completed",
             reference_id=f"apt_test_{result_id}",
-            cursor=cursor
+            cursor=cursor,
         )
         xp_earned = xp_res.get("xp_earned", 30)
 
         conn.commit()
-
     except Exception:
         conn.rollback()
         raise
-
     finally:
         cursor.close()
         conn.close()
 
     return {
         "result_id": result_id,
-        "category": payload.category,
+        "assessment_id": assessment_id,
+        "category": category,
         "total_questions": total_questions,
+        "attempted_questions": attempted,
         "correct_answers": correct_count,
         "incorrect_answers": incorrect_count,
         "unattempted": unattempted_count,
         "score_percentage": score_percentage,
         "accuracy": accuracy,
-        "time_taken_seconds": payload.time_taken_seconds,
+        "time_taken_seconds": time_taken_seconds,
         "xp_earned": xp_earned,
         "category_breakdown": category_scores,
-        "detailed_results": detailed_results
+        "detailed_results": detailed_results,
     }
 
 
+@app.post("/api/aptitude/submit")
+def submit_aptitude_test(
+    payload: SubmitTestRequest,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, payload.user_id)
+    return _evaluate_and_save_assessment(
+        uid=uid,
+        category=payload.category,
+        time_taken_seconds=payload.time_taken_seconds,
+        answers=payload.answers,
+        assessment_id=payload.assessment_id,
+    )
+
+
 # -------------------------------------------------------------
-# Aptitude Test Results
+# Aptitude Test Results & Detail History
 # -------------------------------------------------------------
 
 @app.get("/api/aptitude/results")
 def get_aptitude_results(
-    user_id: Optional[int] = 1,
-    limit: int = 10
+    user_id: Optional[int] = None,
+    limit: int = 10,
+    authorization: Optional[str] = Header(None),
 ):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -1031,12 +1458,14 @@ def get_aptitude_results(
             SELECT
                 id,
                 user_id,
+                assessment_id,
                 category,
                 total_questions,
                 correct_answers,
                 incorrect_answers,
                 unattempted,
                 score_percentage,
+                accuracy,
                 time_taken_seconds,
                 completed_at
             FROM aptitude_test_results
@@ -1044,34 +1473,35 @@ def get_aptitude_results(
             ORDER BY completed_at DESC
             LIMIT %s
             """,
-            (
-                user_id,
-                limit
-            )
+            (uid, limit),
         )
         rows = cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
 
-    results = [
-        dict(row)
-        for row in rows
-    ]
+    results = []
+    for row in rows:
+        item = dict(row)
+        attempted = max(0, (item["total_questions"] or 0) - (item["unattempted"] or 0))
+        if item.get("accuracy") is None:
+            item["accuracy"] = (
+                round((item["correct_answers"] / attempted) * 100, 1)
+                if attempted > 0
+                else 0.0
+            )
+        results.append(item)
 
-    return {
-        "results": results
-    }
+    return {"results": results}
 
-
-# -------------------------------------------------------------
-# Aptitude Result Details
-# -------------------------------------------------------------
 
 @app.get("/api/aptitude/results/{result_id}")
 def get_aptitude_result_detail(
-    result_id: int
+    result_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None),
 ):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -1080,9 +1510,9 @@ def get_aptitude_result_detail(
             """
             SELECT *
             FROM aptitude_test_results
-            WHERE id = %s
+            WHERE id = %s AND user_id = %s
             """,
-            (result_id,)
+            (result_id, uid),
         )
         row = cursor.fetchone()
     finally:
@@ -1090,20 +1520,25 @@ def get_aptitude_result_detail(
         conn.close()
 
     if not row:
-        raise HTTPException(
-            status_code=404,
-            detail="Test result not found"
-        )
+        raise HTTPException(status_code=404, detail="Test result not found")
 
     data = dict(row)
-
     try:
-        data["answers_data"] = json.loads(
-            data["answers_json"]
-        )
+        parsed = json.loads(data["answers_json"])
     except Exception:
-        data["answers_data"] = {}
+        parsed = {}
 
+    attempted = max(0, (data.get("total_questions") or 0) - (data.get("unattempted") or 0))
+    if data.get("accuracy") is None:
+        data["accuracy"] = (
+            round((data["correct_answers"] / attempted) * 100, 1)
+            if attempted > 0
+            else 0.0
+        )
+    data["result_id"] = data["id"]
+    data["attempted_questions"] = attempted
+    data["category_breakdown"] = parsed.get("category_scores", {})
+    data["detailed_results"] = parsed.get("detailed_results", [])
     return data
 
 
@@ -1112,7 +1547,11 @@ def get_aptitude_result_detail(
 # -------------------------------------------------------------
 
 @app.get("/api/companies")
-def get_companies(user_id: Optional[int] = 1):
+def get_companies(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1129,9 +1568,10 @@ def get_companies(user_id: Optional[int] = 1):
             GROUP BY q.company_tag
             ORDER BY count DESC
             """,
-            (user_id or 1,)
+            (uid,)
         )
         rows = cursor.fetchall()
+        apt_by_company = {r["company_tag"]: {"total": r["count"], "solved": r["solved_count"] or 0} for r in rows}
 
         # Query DSA problem counts and user solved counts per company
         cursor.execute(
@@ -1148,124 +1588,107 @@ def get_companies(user_id: Optional[int] = 1):
                 ON p.id = up.problem_id AND up.user_id = %s
             GROUP BY comp
             """,
-            (user_id or 1,)
+            (uid,)
         )
         dsa_rows = cursor.fetchall()
         dsa_by_company = {r["comp"]: {"total": r["dsa_total"], "solved": r["dsa_solved"]} for r in dsa_rows}
+
+        cursor.execute("SELECT * FROM company_tracks ORDER BY is_upcoming ASC, name ASC;")
+        track_rows = cursor.fetchall()
+        tracks_by_name = {r["name"]: dict(r) for r in track_rows}
+
+        cursor.execute("SELECT company_name FROM user_company_bookmarks WHERE user_id = %s;", (uid,))
+        bookmarked_companies = [r["company_name"] for r in cursor.fetchall()]
     finally:
         cursor.close()
         conn.close()
 
-    meta = {
-        "Google": {
-            "logo": "🌐", 
-            "role": "Software Development Engineer (SDE)", 
-            "difficulty": "Hard",
-            "test_pattern": "OA: 2 Coding Problems (60 mins) + Technical & Analytical Assessment",
-            "sections": ["Data Structures", "Algorithms", "System Analytical Thinking"]
-        },
-        "Microsoft": {
-            "logo": "🪟", 
-            "role": "Software Engineer", 
-            "difficulty": "Medium",
-            "test_pattern": "Codility OA: 3 Tasks (70 mins) + Analytical Aptitude",
-            "sections": ["Arrays & Strings", "Dynamic Programming", "Logical Reasoning"]
-        },
-        "Amazon": {
-            "logo": "📦", 
-            "role": "SDE-1 (Frontend / Backend)", 
-            "difficulty": "Hard",
-            "test_pattern": "Online Assessment (OA1 + OA2): 2 Coding (70 mins) + Work Simulation & Aptitude",
-            "sections": ["Problem Solving", "Behavioral Leadership", "Data Structures"]
-        },
-        "Meta": {
-            "logo": "♾️", 
-            "role": "Software Engineer", 
-            "difficulty": "Extreme",
-            "test_pattern": "HackerRank OA: 2 Coding (45 mins) + System Design Fundamentals",
-            "sections": ["Speed Coding", "Graph Algorithms", "Data Structures"]
-        },
-        "TCS": {
-            "logo": "🏢", 
-            "role": "Ninja / Digital / Prime Developer", 
-            "difficulty": "Medium",
-            "test_pattern": "TCS NQT: Numerical (20Q, 25m) + Verbal (25Q, 25m) + Reasoning (20Q, 25m) + Coding (2Q, 45m)",
-            "sections": ["Quantitative Aptitude", "Reasoning Ability", "Verbal Ability", "Coding"]
-        },
-        "Infosys": {
-            "logo": "💼", 
-            "role": "Systems Engineer / Specialist (DSE)", 
-            "difficulty": "Medium",
-            "test_pattern": "Infosys OA: Reasoning (15Q, 25m) + Mathematical (10Q, 35m) + Verbal (20Q, 20m) + Pseudocode (5Q, 10m)",
-            "sections": ["Mathematical Critical Thinking", "Logical Deduction", "Verbal Ability", "Pseudocode"]
-        },
-        "Wipro": {
-            "logo": "⚡", 
-            "role": "Project Engineer / Turbo", 
-            "difficulty": "Medium",
-            "test_pattern": "NLTH: Quantitative (16Q, 16m) + Logical (14Q, 14m) + Verbal (22Q, 18m) + Essay (1Q, 20m) + Coding (2Q, 60m)",
-            "sections": ["Quantitative Aptitude", "Logical Reasoning", "Verbal Ability", "Basic Coding"]
-        },
-        "Accenture": {
-            "logo": "🚀", 
-            "role": "Associate Software Engineer", 
-            "difficulty": "Medium",
-            "test_pattern": "Cognitive (50Q) + Technical (40Q) in 90 mins (Critical Thinking, English, MS Office, Pseudocode, Cloud)",
-            "sections": ["Cognitive Assessment", "Technical & Pseudocode", "Coding (45m)"]
-        },
-        "Cognizant": {
-            "logo": "💡", 
-            "role": "GenC / GenC Next Developer", 
-            "difficulty": "Medium",
-            "test_pattern": "GenC Assessment: Quantitative (25Q, 35m) + Logical (20Q, 35m) + Verbal (20Q, 20m) + Coding",
-            "sections": ["Analytical Ability", "English Comprehension", "Domain Technical"]
-        },
-        "Capgemini": {
-            "logo": "🔷", 
-            "role": "Software Analyst", 
-            "difficulty": "Medium",
-            "test_pattern": "Capgemini OA: Pseudocode (30Q, 30m) + English (30Q, 30m) + Game-Based Aptitude (4 games) + Behavioral",
-            "sections": ["Pseudocode Analysis", "Verbal Ability", "Game-Based Aptitude"]
-        },
-        "Deloitte": {
-            "logo": "📊", 
-            "role": "Technology Consulting Analyst", 
-            "difficulty": "Medium",
-            "test_pattern": "Deloitte OA: Quantitative (15Q, 15m) + Logical (15Q, 15m) + Verbal (15Q, 15m) + Computer Fundamentals (30Q, 30m)",
-            "sections": ["Quantitative Analysis", "Logical Deduction", "Verbal Communication", "Computer Science"]
-        },
-    }
+    active_names = sorted(
+        set(list(apt_by_company.keys()) + [n for n, t in tracks_by_name.items() if not t.get("is_upcoming")]),
+        key=lambda n: (apt_by_company.get(n, {}).get("total", 0) + dsa_by_company.get(n, {}).get("total", 0)),
+        reverse=True
+    )
 
     companies = []
-    for r in rows:
-        c_name = r["company_tag"]
-        info = meta.get(c_name, {
-            "logo": "🏢", 
-            "role": "Software Engineer", 
-            "difficulty": "Medium",
-            "test_pattern": "Online Assessment & Technical Interview Track",
-            "sections": ["Aptitude", "Technical", "Coding"]
-        })
-        solved = r["solved_count"] or 0
-        total = r["count"]
-        pct = round((solved / total) * 100, 1) if total > 0 else 0.0
+    for c_name in active_names:
+        apt_info = apt_by_company.get(c_name, {"total": 0, "solved": 0})
         dsa_info = dsa_by_company.get(c_name, {"total": 0, "solved": 0})
+        if apt_info["total"] == 0 and dsa_info["total"] == 0:
+            continue
+        info = tracks_by_name.get(c_name, {})
+        solved = apt_info["solved"]
+        total = apt_info["total"]
+        pct = round((solved / total) * 100, 1) if total > 0 else 0.0
         companies.append({
-            "id": c_name.lower(),
+            "id": info.get("slug") or c_name.lower(),
             "name": c_name,
-            "logo": info["logo"],
-            "role": info["role"],
-            "hiringDifficulty": info["difficulty"],
-            "testPattern": info.get("test_pattern", "Online Assessment"),
-            "sections": info.get("sections", []),
+            "category": info.get("category") or "Product-Based",
+            "logo": info.get("logo") or "🏢",
+            "role": info.get("role") or "Software Engineer",
+            "hiringDifficulty": info.get("hiring_difficulty") or "Medium",
+            "assessmentType": info.get("assessment_type") or ("Aptitude + Coding" if total > 0 else "Coding + DSA"),
+            "roundsCount": info.get("rounds_count") or 3,
+            "description": info.get("description") or f"Targeted placement preparation track for {c_name}.",
+            "testPattern": info.get("test_pattern") or "Online Assessment & Technical Interview Track",
+            "sections": info.get("sections") or ["Aptitude", "Technical", "Coding"],
+            "stages": info.get("stages") or [],
+            "experiences": info.get("experiences") or [],
             "totalQuestions": total,
             "solvedQuestions": solved,
             "progressPercent": pct,
             "dsaTotal": dsa_info["total"],
-            "dsaSolved": dsa_info["solved"]
+            "dsaSolved": dsa_info["solved"],
+            "isBookmarked": c_name in bookmarked_companies,
         })
 
-    return {"companies": companies}
+    upcoming_companies = [
+        {"name": t["name"], "category": t["category"], "role": t["role"]}
+        for t in track_rows
+        if t.get("is_upcoming") and t["name"] not in {c["name"] for c in companies}
+    ]
+
+    return {
+        "companies": companies,
+        "upcoming_companies": upcoming_companies,
+        "bookmarked_companies": bookmarked_companies,
+    }
+
+
+@app.post("/api/companies/{company_name}/bookmark")
+def toggle_company_bookmark(
+    company_name: str,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    clean_name = company_name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Company name is required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT 1 FROM user_company_bookmarks WHERE user_id = %s AND company_name = %s;",
+            (uid, clean_name)
+        )
+        exists = cursor.fetchone()
+        if exists:
+            cursor.execute(
+                "DELETE FROM user_company_bookmarks WHERE user_id = %s AND company_name = %s;",
+                (uid, clean_name)
+            )
+            is_bookmarked = False
+        else:
+            cursor.execute(
+                "INSERT INTO user_company_bookmarks (user_id, company_name) VALUES (%s, %s) ON CONFLICT DO NOTHING;",
+                (uid, clean_name)
+            )
+            is_bookmarked = True
+        conn.commit()
+        return {"company_name": clean_name, "is_bookmarked": is_bookmarked}
+    finally:
+        cursor.close()
+        conn.close()
 
 
 # -------------------------------------------------------------
@@ -1274,33 +1697,35 @@ def get_companies(user_id: Optional[int] = 1):
 
 @app.get("/api/aptitude/modules")
 def get_aptitude_modules(
-    user_id: Optional[int] = 1,
-    company: Optional[str] = None
+    user_id: Optional[int] = None,
+    company: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
 ):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         where_extra = ""
-        params = [user_id or 1]
+        params = [uid]
         if company and company.lower() != "all":
             where_extra = "WHERE LOWER(q.company_tag) = %s"
             params.append(company.lower())
 
         cursor.execute(
             f"""
-            SELECT 
+            SELECT
                 q.category,
                 q.subtopic,
                 COUNT(q.id) AS total_questions,
                 COUNT(CASE WHEN p.status = 'solved' THEN 1 END) AS solved_questions
             FROM aptitude_questions q
-            LEFT JOIN user_question_progress p 
+            LEFT JOIN user_question_progress p
                 ON q.id = p.question_id AND p.user_id = %s
             {where_extra}
             GROUP BY q.category, q.subtopic
             ORDER BY q.category, total_questions DESC
             """,
-            tuple(params)
+            tuple(params),
         )
         rows = cursor.fetchall()
     finally:
@@ -1312,33 +1737,42 @@ def get_aptitude_modules(
         cat = r["category"]
         if cat not in modules:
             modules[cat] = []
-        modules[cat].append({
-            "subtopic": r["subtopic"],
-            "total": r["total_questions"],
-            "solved": r["solved_questions"],
-            "progress": round((r["solved_questions"] / r["total_questions"]) * 100, 1) if r["total_questions"] > 0 else 0
-        })
+        modules[cat].append(
+            {
+                "subtopic": r["subtopic"],
+                "total": r["total_questions"],
+                "solved": r["solved_questions"],
+                "progress": (
+                    round((r["solved_questions"] / r["total_questions"]) * 100, 1)
+                    if r["total_questions"] > 0
+                    else 0
+                ),
+            }
+        )
 
     return {"modules": modules}
 
 
 @app.get("/api/aptitude/directory")
 def get_aptitude_directory(
-    user_id: Optional[int] = 1,
+    user_id: Optional[int] = None,
     category: Optional[str] = "all",
     subtopic: Optional[str] = "all",
     company: Optional[str] = "all",
     difficulty: Optional[str] = "all",
     status: Optional[str] = "all",
+    sort_by: Optional[str] = "id",
     search: Optional[str] = None,
     page: int = 1,
-    limit: int = 20
+    limit: int = 20,
+    authorization: Optional[str] = Header(None),
 ):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
 
     conditions = ["1=1"]
-    params = [user_id or 1]
+    params = [uid]
 
     if category and category.lower() != "all":
         conditions.append("q.category = %s")
@@ -1360,50 +1794,75 @@ def get_aptitude_directory(
         conditions.append("p.status = 'solved'")
     elif status == "unsolved":
         conditions.append("(p.status IS NULL OR p.status != 'solved')")
+    elif status == "starred":
+        conditions.append("p.is_starred = TRUE")
 
     if search and search.strip():
-        conditions.append("(q.question_text ILIKE %s OR q.subtopic ILIKE %s)")
-        params.append(f"%{search.strip()}%")
-        params.append(f"%{search.strip()}%")
+        s_term = f"%{search.strip()}%"
+        conditions.append(
+            "(q.question_text ILIKE %s OR q.subtopic ILIKE %s OR q.category ILIKE %s)"
+        )
+        params.extend([s_term, s_term, s_term])
 
     where_clause = " AND ".join(conditions)
 
+    order_clause = "q.id ASC"
+    if sort_by == "difficulty":
+        order_clause = (
+            "CASE LOWER(q.difficulty) "
+            "WHEN 'easy' THEN 1 WHEN 'medium' THEN 2 WHEN 'hard' THEN 3 ELSE 4 END ASC, q.id ASC"
+        )
+    elif sort_by == "subtopic":
+        order_clause = "q.subtopic ASC, q.id ASC"
+    elif sort_by == "status":
+        order_clause = "CASE WHEN p.status = 'solved' THEN 0 ELSE 1 END ASC, q.id ASC"
+
     try:
-        # Count total matching
         count_query = f"""
             SELECT COUNT(*) AS total
             FROM aptitude_questions q
-            LEFT JOIN user_question_progress p 
+            LEFT JOIN user_question_progress p
                 ON q.id = p.question_id AND p.user_id = %s
             WHERE {where_clause}
         """
         cursor.execute(count_query, tuple(params))
-        total_matching = cursor.fetchone()["total"]
+        total_matching = int(cursor.fetchone()["total"] or 0)
 
-        # Count total solved in this scope for this user
         if company and company.lower() != "all":
             cursor.execute(
                 """
-                SELECT COUNT(*) AS solved_total 
+                SELECT
+                    COUNT(*) FILTER (WHERE p.status = 'solved') AS solved_total,
+                    COUNT(*) FILTER (WHERE p.is_starred = TRUE) AS starred_total
                 FROM user_question_progress p
                 JOIN aptitude_questions q ON p.question_id = q.id
-                WHERE p.user_id = %s AND p.status = 'solved' AND LOWER(q.company_tag) = %s
+                WHERE p.user_id = %s AND LOWER(q.company_tag) = %s
                 """,
-                (user_id or 1, company.lower())
+                (uid, company.lower()),
             )
-            total_solved = cursor.fetchone()["solved_total"]
+            counts_row = cursor.fetchone()
+            total_solved = int(counts_row["solved_total"] or 0)
+            total_starred = int(counts_row["starred_total"] or 0)
 
             cursor.execute(
                 "SELECT COUNT(*) AS c_total FROM aptitude_questions WHERE LOWER(company_tag) = %s",
-                (company.lower(),)
+                (company.lower(),),
             )
-            company_total = cursor.fetchone()["c_total"]
+            company_total = int(cursor.fetchone()["c_total"] or 0)
         else:
             cursor.execute(
-                "SELECT COUNT(*) AS solved_total FROM user_question_progress WHERE user_id = %s AND status = 'solved'",
-                (user_id or 1,)
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'solved') AS solved_total,
+                    COUNT(*) FILTER (WHERE is_starred = TRUE) AS starred_total
+                FROM user_question_progress
+                WHERE user_id = %s
+                """,
+                (uid,),
             )
-            total_solved = cursor.fetchone()["solved_total"]
+            counts_row = cursor.fetchone()
+            total_solved = int(counts_row["solved_total"] or 0)
+            total_starred = int(counts_row["starred_total"] or 0)
             company_total = None
 
         offset = max(0, (page - 1) * limit)
@@ -1411,7 +1870,7 @@ def get_aptitude_directory(
         data_params.extend([limit, offset])
 
         data_query = f"""
-            SELECT 
+            SELECT
                 q.id,
                 q.category,
                 q.subtopic,
@@ -1425,12 +1884,13 @@ def get_aptitude_directory(
                 q.correct_option,
                 q.explanation,
                 p.status AS user_status,
-                p.selected_option AS user_selected
+                p.selected_option AS user_selected,
+                COALESCE(p.is_starred, FALSE) AS is_starred
             FROM aptitude_questions q
-            LEFT JOIN user_question_progress p 
+            LEFT JOIN user_question_progress p
                 ON q.id = p.question_id AND p.user_id = %s
             WHERE {where_clause}
-            ORDER BY q.id ASC
+            ORDER BY {order_clause}
             LIMIT %s OFFSET %s
         """
         cursor.execute(data_query, tuple(data_params))
@@ -1441,40 +1901,152 @@ def get_aptitude_directory(
 
     questions = []
     for r in rows:
-        is_solved = (r["user_status"] == "solved")
-        questions.append({
-            "id": r["id"],
-            "category": r["category"],
-            "subtopic": r["subtopic"],
-            "difficulty": r["difficulty"],
-            "company_tag": r["company_tag"] or "General",
-            "question_text": r["question_text"],
-            "options": {
-                "A": r["option_a"],
-                "B": r["option_b"],
-                "C": r["option_c"],
-                "D": r["option_d"]
-            },
-            "correct_option": r["correct_option"],
-            "explanation": r["explanation"],
-            "is_solved": is_solved,
-            "user_status": r["user_status"],
-            "user_selected": r["user_selected"]
-        })
+        is_solved = r["user_status"] == "solved"
+        questions.append(
+            {
+                "id": r["id"],
+                "category": r["category"],
+                "subtopic": r["subtopic"],
+                "difficulty": r["difficulty"],
+                "company_tag": r["company_tag"] or "General",
+                "question_text": r["question_text"],
+                "options": {
+                    "A": r["option_a"],
+                    "B": r["option_b"],
+                    "C": r["option_c"],
+                    "D": r["option_d"],
+                },
+                # Never expose answer/explanation before question is solved by user
+                "correct_option": r["correct_option"] if is_solved else None,
+                "explanation": r["explanation"] if is_solved else None,
+                "is_solved": is_solved,
+                "is_starred": bool(r["is_starred"]),
+                "user_status": r["user_status"],
+                "user_selected": r["user_selected"],
+            }
+        )
 
     return {
         "questions": questions,
         "total": total_matching,
         "total_solved": total_solved,
+        "total_starred": total_starred,
         "company_total": company_total,
         "page": page,
         "limit": limit,
-        "total_pages": max(1, (total_matching + limit - 1) // limit)
+        "total_pages": max(1, (total_matching + limit - 1) // limit),
+    }
+
+
+@app.get("/api/aptitude/questions/{question_id}")
+def get_aptitude_question_detail(
+    question_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT
+                q.*,
+                p.status AS user_status,
+                p.selected_option AS user_selected,
+                COALESCE(p.is_starred, FALSE) AS is_starred
+            FROM aptitude_questions q
+            LEFT JOIN user_question_progress p
+                ON q.id = p.question_id AND p.user_id = %s
+            WHERE q.id = %s
+            """,
+            (uid, question_id),
+        )
+        r = cursor.fetchone()
+    finally:
+        cursor.close()
+        conn.close()
+
+    if not r:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    is_solved = r["user_status"] == "solved"
+    return {
+        "id": r["id"],
+        "category": r["category"],
+        "subtopic": r["subtopic"],
+        "difficulty": r["difficulty"],
+        "company_tag": r["company_tag"] or "General",
+        "question_text": r["question_text"],
+        "options": {
+            "A": r["option_a"],
+            "B": r["option_b"],
+            "C": r["option_c"],
+            "D": r["option_d"],
+        },
+        "correct_option": r["correct_option"] if is_solved else None,
+        "explanation": r["explanation"] if is_solved else None,
+        "is_solved": is_solved,
+        "is_starred": bool(r["is_starred"]),
+        "user_status": r["user_status"],
+        "user_selected": r["user_selected"],
+    }
+
+
+@app.post("/api/aptitude/questions/{question_id}/star")
+def toggle_aptitude_question_star(
+    question_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, user_id)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM aptitude_questions WHERE id = %s", (question_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Question not found")
+
+        cursor.execute(
+            """
+            INSERT INTO user_question_progress (user_id, question_id, status, is_starred, updated_at)
+            VALUES (%s, %s, 'unattempted', TRUE, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, question_id)
+            DO UPDATE SET
+                is_starred = NOT user_question_progress.is_starred,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING is_starred
+            """,
+            (uid, question_id),
+        )
+        new_starred = bool(cursor.fetchone()["is_starred"])
+
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM user_question_progress WHERE user_id = %s AND is_starred = TRUE",
+            (uid,),
+        )
+        starred_count = int(cursor.fetchone()["cnt"] or 0)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {
+        "question_id": question_id,
+        "is_starred": new_starred,
+        "starred_count": starred_count,
     }
 
 
 @app.post("/api/aptitude/solve-single")
-def solve_single_question(payload: SingleSolveRequest):
+def solve_single_question(
+    payload: SingleSolveRequest,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, payload.user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1485,30 +2057,39 @@ def solve_single_question(payload: SingleSolveRequest):
 
         correct = q["correct_option"].upper().strip()
         selected = payload.selected_option.upper().strip()
-        is_correct = (selected == correct)
+        is_correct = selected == correct
         status = "solved" if is_correct else "incorrect"
 
         cursor.execute(
             """
             INSERT INTO user_question_progress (user_id, question_id, status, selected_option, updated_at)
             VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (user_id, question_id) 
-            DO UPDATE SET status = EXCLUDED.status, selected_option = EXCLUDED.selected_option, updated_at = CURRENT_TIMESTAMP
+            ON CONFLICT (user_id, question_id)
+            DO UPDATE SET
+                status = CASE
+                    WHEN user_question_progress.status = 'solved' THEN 'solved'
+                    ELSE EXCLUDED.status
+                END,
+                selected_option = EXCLUDED.selected_option,
+                updated_at = CURRENT_TIMESTAMP
             """,
-            (payload.user_id or 1, payload.question_id, status, selected)
+            (uid, payload.question_id, status, selected),
         )
 
         xp_earned = 0
         if is_correct:
             xp_res = award_xp(
-                user_id=payload.user_id or 1,
+                user_id=uid,
                 activity_type="aptitude_completed",
                 reference_id=f"apt_q_{payload.question_id}",
-                cursor=cursor
+                cursor=cursor,
             )
             xp_earned = xp_res.get("xp_earned", 30)
 
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         cursor.close()
         conn.close()
@@ -1520,8 +2101,268 @@ def solve_single_question(payload: SingleSolveRequest):
         "is_correct": is_correct,
         "status": status,
         "xp_earned": xp_earned,
-        "explanation": q["explanation"]
+        "explanation": q["explanation"],
     }
+
+
+@app.post("/api/aptitude/assessments/generate")
+def generate_aptitude_assessment(
+    payload: GenerateAssessmentRequest,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    safe_limit = max(1, min(100, int(payload.limit or 10)))
+    time_per_q = (
+        30 if payload.timer_mode == "blitz" else 0 if payload.timer_mode == "untimed" else 60
+    )
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        query = """
+            SELECT
+                id,
+                category,
+                subtopic,
+                difficulty,
+                company_tag,
+                question_text,
+                option_a,
+                option_b,
+                option_c,
+                option_d
+            FROM aptitude_questions
+            WHERE 1=1
+        """
+        params = []
+
+        if payload.category and payload.category.lower() != "all":
+            query += " AND category = %s"
+            params.append(payload.category.lower())
+        if payload.difficulty and payload.difficulty.lower() != "all":
+            query += " AND LOWER(difficulty) = %s"
+            params.append(payload.difficulty.lower())
+        if payload.company and payload.company.lower() != "all":
+            query += " AND LOWER(company_tag) = %s"
+            params.append(payload.company.lower())
+        if payload.subtopic and payload.subtopic.lower() != "all":
+            query += " AND subtopic = %s"
+            params.append(payload.subtopic)
+
+        query += " ORDER BY RANDOM() LIMIT %s"
+        params.append(safe_limit)
+
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+
+        if not rows:
+            return {
+                "assessment_id": None,
+                "count": 0,
+                "questions": [],
+            }
+
+        question_ids = [r["id"] for r in rows]
+        time_limit_seconds = len(rows) * time_per_q
+
+        title_parts = []
+        if payload.company and payload.company.lower() != "all":
+            title_parts.append(payload.company)
+        if payload.category and payload.category.lower() != "all":
+            title_parts.append(
+                APTITUDE_CATEGORY_META.get(payload.category.lower(), {}).get(
+                    "name", payload.category.title()
+                )
+            )
+        else:
+            title_parts.append("Mixed Aptitude")
+        title = f"{' · '.join(title_parts)} ({len(rows)} Qs)"
+
+        cursor.execute(
+            """
+            INSERT INTO aptitude_assessments
+            (user_id, title, category, difficulty, company, subtopic, timer_mode, time_limit_seconds, question_ids)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            RETURNING id, started_at
+            """,
+            (
+                uid,
+                title,
+                payload.category,
+                payload.difficulty,
+                payload.company,
+                payload.subtopic,
+                payload.timer_mode,
+                time_limit_seconds,
+                json.dumps(question_ids),
+            ),
+        )
+        created = cursor.fetchone()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+    questions = [
+        {
+            "id": r["id"],
+            "category": r["category"],
+            "subtopic": r["subtopic"],
+            "difficulty": r["difficulty"],
+            "company_tag": r["company_tag"] or "General",
+            "question_text": r["question_text"],
+            "options": {
+                "A": r["option_a"],
+                "B": r["option_b"],
+                "C": r["option_c"],
+                "D": r["option_d"],
+            },
+        }
+        for r in rows
+    ]
+
+    return {
+        "assessment_id": created["id"],
+        "title": title,
+        "category": payload.category,
+        "difficulty": payload.difficulty,
+        "company": payload.company,
+        "subtopic": payload.subtopic,
+        "timer_mode": payload.timer_mode,
+        "time_limit_seconds": time_limit_seconds,
+        "started_at": str(created["started_at"]),
+        "count": len(questions),
+        "questions": questions,
+    }
+
+
+@app.get("/api/aptitude/assessments/{assessment_id}")
+def get_aptitude_assessment(
+    assessment_id: int,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM aptitude_assessments WHERE id = %s AND user_id = %s",
+            (assessment_id, uid),
+        )
+        ass = cursor.fetchone()
+        if not ass:
+            raise HTTPException(status_code=404, detail="Assessment not found")
+
+        q_ids = ass["question_ids"] or []
+        questions = []
+        if q_ids:
+            placeholders = ",".join(["%s"] * len(q_ids))
+            cursor.execute(
+                f"""
+                SELECT id, category, subtopic, difficulty, company_tag, question_text,
+                       option_a, option_b, option_c, option_d
+                FROM aptitude_questions
+                WHERE id IN ({placeholders})
+                """,
+                tuple(q_ids),
+            )
+            by_id = {r["id"]: r for r in cursor.fetchall()}
+            for qid in q_ids:
+                r = by_id.get(qid)
+                if r:
+                    questions.append(
+                        {
+                            "id": r["id"],
+                            "category": r["category"],
+                            "subtopic": r["subtopic"],
+                            "difficulty": r["difficulty"],
+                            "company_tag": r["company_tag"] or "General",
+                            "question_text": r["question_text"],
+                            "options": {
+                                "A": r["option_a"],
+                                "B": r["option_b"],
+                                "C": r["option_c"],
+                                "D": r["option_d"],
+                            },
+                        }
+                    )
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {
+        "assessment_id": ass["id"],
+        "title": ass["title"],
+        "category": ass["category"],
+        "timer_mode": ass["timer_mode"],
+        "time_limit_seconds": ass["time_limit_seconds"],
+        "status": ass["status"],
+        "saved_answers": ass["saved_answers"] or {},
+        "marked_review": ass["marked_review"] or {},
+        "questions": questions,
+    }
+
+
+@app.put("/api/aptitude/assessments/{assessment_id}/progress")
+def save_aptitude_assessment_progress(
+    assessment_id: int,
+    payload: SaveAssessmentProgressRequest,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE aptitude_assessments
+            SET saved_answers = %s::jsonb,
+                marked_review = %s::jsonb
+            WHERE id = %s AND user_id = %s AND status = 'in_progress'
+            RETURNING id
+            """,
+            (
+                json.dumps(payload.saved_answers or {}),
+                json.dumps(payload.marked_review or {}),
+                assessment_id,
+                uid,
+            ),
+        )
+        updated = cursor.fetchone()
+        if not updated:
+            raise HTTPException(
+                status_code=404,
+                detail="Active assessment not found or already submitted",
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"saved": True, "assessment_id": assessment_id}
+
+
+@app.post("/api/aptitude/assessments/{assessment_id}/submit")
+def submit_aptitude_assessment_by_id(
+    assessment_id: int,
+    payload: SubmitTestRequest,
+    authorization: Optional[str] = Header(None),
+):
+    uid = resolve_aptitude_user_id(authorization, payload.user_id)
+    return _evaluate_and_save_assessment(
+        uid=uid,
+        category=payload.category,
+        time_taken_seconds=payload.time_taken_seconds,
+        answers=payload.answers,
+        assessment_id=assessment_id,
+    )
 
 
 # -------------------------------------------------------------
@@ -1529,7 +2370,11 @@ def solve_single_question(payload: SingleSolveRequest):
 # -------------------------------------------------------------
 
 @app.get("/api/dsa/meta")
-def get_dsa_meta(user_id: Optional[int] = 1):
+def get_dsa_meta(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1546,7 +2391,7 @@ def get_dsa_meta(user_id: Optional[int] = 1):
             FROM user_dsa_progress 
             WHERE user_id = %s
             """,
-            (user_id or 1,)
+            (uid,)
         )
         prog = cursor.fetchone()
         solved_count = prog["solved_count"] or 0
@@ -1606,7 +2451,7 @@ def get_dsa_meta(user_id: Optional[int] = 1):
 
 @app.get("/api/dsa/problems")
 def get_dsa_problems(
-    user_id: Optional[int] = 1,
+    user_id: Optional[int] = None,
     page: int = 1,
     limit: int = 25,
     search: Optional[str] = None,
@@ -1614,13 +2459,15 @@ def get_dsa_problems(
     company: Optional[str] = "all",
     topic: Optional[str] = "all",
     status: Optional[str] = "all",
-    sort_by: Optional[str] = "id"
+    sort_by: Optional[str] = "id",
+    authorization: Optional[str] = Header(None)
 ):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
 
     conditions = ["1=1"]
-    params = [user_id or 1]
+    params = [uid]
 
     if difficulty and difficulty.lower() != "all":
         conditions.append("LOWER(p.difficulty) = %s")
@@ -1700,7 +2547,7 @@ def get_dsa_problems(
     problems = []
     for r in rows:
         freq_map = r["company_frequencies"] if isinstance(r["company_frequencies"], dict) else {}
-        freq = 50.0
+        freq = 0.0
         if company and company.lower() != "all":
             for c_k, c_v in freq_map.items():
                 if c_k.lower() == company.lower():
@@ -1714,7 +2561,7 @@ def get_dsa_problems(
             "title": r["title"],
             "slug": r["slug"],
             "difficulty": r["difficulty"],
-            "acceptance_rate": round(r["acceptance_rate"], 1),
+            "acceptance_rate": round(r["acceptance_rate"], 1) if r["acceptance_rate"] is not None else 0.0,
             "link": r["link"],
             "topics": r["topics"] or [],
             "companies": r["companies"] or [],
@@ -1733,7 +2580,11 @@ def get_dsa_problems(
 
 
 @app.post("/api/dsa/toggle-solved")
-def toggle_dsa_solved(payload: DSAToggleSolvedRequest):
+def toggle_dsa_solved(
+    payload: DSAToggleSolvedRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, payload.user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1748,14 +2599,14 @@ def toggle_dsa_solved(payload: DSAToggleSolvedRequest):
                 updated_at = CURRENT_TIMESTAMP
             RETURNING is_solved
             """,
-            (payload.user_id or 1, payload.problem_id)
+            (uid, payload.problem_id)
         )
         row = cursor.fetchone()
         is_solved = row["is_solved"]
         xp_earned = 0
         if is_solved:
             xp_res = award_xp(
-                user_id=payload.user_id or 1,
+                user_id=uid,
                 activity_type="dsa_solved",
                 reference_id=f"dsa_{payload.problem_id}",
                 cursor=cursor
@@ -1774,7 +2625,11 @@ def toggle_dsa_solved(payload: DSAToggleSolvedRequest):
 
 
 @app.post("/api/dsa/toggle-bookmark")
-def toggle_dsa_bookmark(payload: DSAToggleBookmarkRequest):
+def toggle_dsa_bookmark(
+    payload: DSAToggleBookmarkRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, payload.user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1788,7 +2643,7 @@ def toggle_dsa_bookmark(payload: DSAToggleBookmarkRequest):
                 updated_at = CURRENT_TIMESTAMP
             RETURNING is_bookmarked
             """,
-            (payload.user_id or 1, payload.problem_id)
+            (uid, payload.problem_id)
         )
         row = cursor.fetchone()
         conn.commit()
@@ -1817,7 +2672,12 @@ class DSASubmitCodeRequest(BaseModel):
 
 
 @app.get("/api/dsa/problems/{problem_id}")
-def get_dsa_problem_detail(problem_id: int, user_id: Optional[int] = 1):
+def get_dsa_problem_detail(
+    problem_id: int,
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1846,7 +2706,7 @@ def get_dsa_problem_detail(problem_id: int, user_id: Optional[int] = 1):
             LEFT JOIN user_dsa_progress u ON p.id = u.problem_id AND u.user_id = %s
             WHERE p.id = %s
             """,
-            (user_id or 1, problem_id)
+            (uid, problem_id)
         )
         row = cursor.fetchone()
         if not row:
@@ -1878,7 +2738,7 @@ def get_dsa_problem_detail(problem_id: int, user_id: Optional[int] = 1):
             "title": row["title"],
             "slug": row["slug"],
             "difficulty": row["difficulty"],
-            "acceptance_rate": round(row["acceptance_rate"], 1) if row["acceptance_rate"] else 50.0,
+            "acceptance_rate": round(row["acceptance_rate"], 1) if row["acceptance_rate"] is not None else 0.0,
             "link": row["link"],
             "topics": row["topics"] or [],
             "companies": row["companies"] or [],
@@ -1947,7 +2807,7 @@ def run_dsa_code(payload: DSARunCodeRequest):
                     status = "runtime_error"
 
             else:
-                stdout_output = f"Code received for {lang.upper()}.\n\nOptimal solution logic verified."
+                stdout_output = f"Local execution sandbox supports Python and JavaScript ({lang.upper()} compiler not attached)."
                 status = "success"
 
     except subprocess.TimeoutExpired:
@@ -1968,7 +2828,11 @@ def run_dsa_code(payload: DSARunCodeRequest):
 
 
 @app.post("/api/dsa/submit-code")
-def submit_dsa_code(payload: DSASubmitCodeRequest):
+def submit_dsa_code(
+    payload: DSASubmitCodeRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, payload.user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1983,11 +2847,11 @@ def submit_dsa_code(payload: DSASubmitCodeRequest):
                 updated_at = CURRENT_TIMESTAMP
             RETURNING is_solved
             """,
-            (payload.user_id or 1, payload.problem_id)
+            (uid, payload.problem_id)
         )
 
         xp_res = award_xp(
-            user_id=payload.user_id or 1,
+            user_id=uid,
             activity_type="coding_solved",
             reference_id=f"code_{payload.problem_id}",
             cursor=cursor
@@ -2046,12 +2910,14 @@ async def analyze_resume_file(
     role: Optional[str] = Form(None),
     target_role: Optional[str] = Form(None),
     job_description: Optional[str] = Form(None),
-    user_id: Optional[int] = Form(1)
+    user_id: Optional[int] = Form(None),
+    authorization: Optional[str] = Header(None)
 ):
     """
     Accepts PDF or DOCX resume, validates file, performs comprehensive analysis,
     persists result in Neon DB, and returns full analysis payload.
     """
+    uid = resolve_aptitude_user_id(authorization, user_id)
     # 1. Validation
     filename = file.filename or "resume.pdf"
     ext = os.path.splitext(filename)[1].lower()
@@ -2106,7 +2972,7 @@ async def analyze_resume_file(
             RETURNING id;
             """,
             (
-                user_id or 1,
+                uid,
                 analysis["file_name"],
                 analysis["file_size"],
                 analysis["overall_score"],
@@ -2226,10 +3092,17 @@ def improve_single_bullet(payload: ResumeBulletImproveRequest):
 
 
 @app.get("/api/resume/latest")
-def get_latest_resume_analysis(user_id: Optional[int] = 1):
+def get_latest_resume_analysis(
+    user_id: Optional[int] = None,
+    authorization: Optional[str] = Header(None)
+):
     """
-    Returns the most recent resume analysis for the user.
+    Returns the most recent resume analysis for the authenticated user.
+    Returns {"analysis": None} when unauthenticated so another user's data is never shown.
     """
+    if not authorization and not user_id:
+        return {"analysis": None}
+    uid = resolve_aptitude_user_id(authorization, user_id)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -2240,7 +3113,7 @@ def get_latest_resume_analysis(user_id: Optional[int] = 1):
             ORDER BY created_at DESC
             LIMIT 1;
             """,
-            (user_id or 1,)
+            (uid,)
         )
         row = cursor.fetchone()
         if not row:
@@ -3003,6 +3876,37 @@ def delete_mentor_conversation(
         conn.close()
 
 
+class RenameConversationRequest(BaseModel):
+    title: str
+
+
+@app.patch("/api/mentor/conversations/{conv_id}")
+def rename_mentor_conversation(
+    conv_id: int,
+    payload: RenameConversationRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_mentor_user_id(authorization)
+    clean_title = payload.title.strip()
+    if not clean_title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE mentor_conversations SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND user_id = %s RETURNING id, title;",
+            (clean_title[:160], conv_id, uid)
+        )
+        updated = cursor.fetchone()
+        if not updated:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conn.commit()
+        return {"status": "ok", "id": updated["id"], "title": updated["title"]}
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.post("/api/mentor/chat")
 def mentor_chat_endpoint(
     req: MentorChatRequest,
@@ -3156,6 +4060,67 @@ class MockInterviewCompleteRequest(BaseModel):
     keyword_matches: Optional[int] = 0
     strengths: Optional[List[str]] = []
     improvements: Optional[List[str]] = []
+    answers: Optional[List[Dict[str, Any]]] = []
+    total_questions: Optional[int] = 0
+    attempted_count: Optional[int] = 0
+
+
+@app.get("/api/interviews/questions")
+def get_mock_interview_questions():
+    """
+    Returns curated interview questions grouped by category from PostgreSQL.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, category, question, keywords, difficulty FROM mock_interview_questions ORDER BY category ASC, id ASC;"
+        )
+        rows = cursor.fetchall()
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for r in rows:
+            grouped.setdefault(r["category"], []).append({
+                "id": r["id"],
+                "question": r["question"],
+                "keywords": r["keywords"] or [],
+                "difficulty": r["difficulty"] or "Medium",
+            })
+        return {"questions_by_category": grouped}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/interviews/history")
+def get_mock_interview_history(
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT id, category, score, average_words, keyword_matches,
+                   strengths, improvements, total_questions, attempted_count, created_at
+            FROM mock_interview_results
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 20;
+            """,
+            (uid,)
+        )
+        rows = cursor.fetchall()
+        history = []
+        for r in rows:
+            item = dict(r)
+            if item.get("created_at"):
+                item["created_at"] = item["created_at"].isoformat()
+            history.append(item)
+        return {"history": history}
+    finally:
+        cursor.close()
+        conn.close()
 
 
 @app.post("/api/interviews/complete")
@@ -3173,8 +4138,8 @@ def record_mock_interview(
     try:
         cursor.execute("""
             INSERT INTO mock_interview_results 
-            (user_id, category, score, average_words, keyword_matches, strengths, improvements, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            (user_id, category, score, average_words, keyword_matches, strengths, improvements, answers_json, total_questions, attempted_count, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
             RETURNING id;
         """, (
             uid,
@@ -3183,7 +4148,10 @@ def record_mock_interview(
             payload.average_words or 0,
             payload.keyword_matches or 0,
             json.dumps(payload.strengths or []),
-            json.dumps(payload.improvements or [])
+            json.dumps(payload.improvements or []),
+            json.dumps(payload.answers or []),
+            payload.total_questions or len(payload.answers or []),
+            payload.attempted_count or 0,
         ))
         res_row = cursor.fetchone()
         interview_id = res_row["id"]
@@ -3465,17 +4433,26 @@ def list_project_ideas(
     technology: Optional[str] = None
 ):
     """
-    Returns curated placement project ideas filterable by domain, difficulty, and technology.
+    Returns placement project ideas from PostgreSQL filterable by domain, difficulty, and technology.
     """
-    ideas = CURATED_PROJECT_IDEAS
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM project_ideas ORDER BY id ASC;")
+        all_rows = [dict(r) for r in cursor.fetchall()]
+    finally:
+        cursor.close()
+        conn.close()
+
+    ideas = all_rows
     if domain and domain.lower() != "all":
         ideas = [i for i in ideas if i["domain"].lower() == domain.lower()]
     if difficulty and difficulty.lower() != "all":
         ideas = [i for i in ideas if i["difficulty"].lower() == difficulty.lower()]
     if technology and technology.lower() != "all":
         t_clean = technology.lower()
-        ideas = [i for i in ideas if any(t_clean in t.lower() for t in i["technologies"])]
-    
+        ideas = [i for i in ideas if any(t_clean in t.lower() for t in (i.get("technologies") or []))]
+
     enriched_ideas = []
     for i in ideas:
         idea_copy = dict(i)
@@ -3483,12 +4460,18 @@ def list_project_ideas(
         idea_copy["key_features"] = i.get("suggested_features", [])
         enriched_ideas.append(idea_copy)
 
+    domains_list = ["All"] + sorted({r["domain"] for r in all_rows if r.get("domain")})
+    diff_order = ["Beginner", "Intermediate", "Advanced"]
+    diffs_present = {r["difficulty"] for r in all_rows if r.get("difficulty")}
+    diffs_list = ["All"] + [d for d in diff_order if d in diffs_present]
+    tech_set = sorted({t for r in all_rows for t in (r.get("technologies") or [])})
+
     return {
         "status": "success",
         "ideas": enriched_ideas,
-        "domains": ["All", "Web Development", "AI/ML", "Cloud", "Data Science", "Cybersecurity", "IoT", "Mobile", "Blockchain"],
-        "difficulties": ["All", "Beginner", "Intermediate", "Advanced"],
-        "technologies": ["All", "React", "Python", "FastAPI", "Node.js", "PostgreSQL", "Docker", "Redis", "TypeScript", "Solidity", "React Native"]
+        "domains": domains_list,
+        "difficulties": diffs_list,
+        "technologies": ["All"] + tech_set
     }
 
 
@@ -3773,6 +4756,539 @@ def delete_milestone(
         cursor.close()
         conn.close()
 
+
+
+# =============================================================
+# COMMUNITY, STUDY GROUPS, EVENTS & PEER MENTORSHIP ENDPOINTS
+# =============================================================
+
+class CreateCommunityPostRequest(BaseModel):
+    title: str
+    content: str
+    category: str = "Placement"
+    tags: Optional[List[str]] = []
+    is_anonymous: bool = False
+
+
+class CreateCommunityCommentRequest(BaseModel):
+    text: str
+
+
+class ConnectionActionRequest(BaseModel):
+    relation_type: str = "connect"
+
+
+def _format_initials(name: Optional[str]) -> str:
+    parts = (name or "").strip().split()
+    if not parts:
+        return "ST"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+def _parse_skill_list(raw_skills) -> List[str]:
+    if not raw_skills:
+        return []
+    if isinstance(raw_skills, list):
+        return [str(s).strip() for s in raw_skills if str(s).strip()]
+    if isinstance(raw_skills, str):
+        s = raw_skills.strip()
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if str(x).strip()]
+            except Exception:
+                pass
+        return [x.strip() for x in s.split(",") if x.strip()]
+    return []
+
+
+@app.get("/api/community/overview")
+def get_community_overview(authorization: Optional[str] = Header(None)):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) AS c FROM users;")
+        members_count = int(cursor.fetchone()["c"])
+
+        cursor.execute("SELECT COUNT(*) AS c FROM community_posts;")
+        discussions_count = int(cursor.fetchone()["c"])
+
+        cursor.execute("SELECT COUNT(*) AS c FROM community_connections WHERE user_id = %s;", (uid,))
+        connections_count = int(cursor.fetchone()["c"])
+
+        cursor.execute("SELECT COUNT(*) AS c FROM users WHERE id != %s;", (uid,))
+        mentors_count = int(cursor.fetchone()["c"])
+
+        cursor.execute("""
+            SELECT g.id, g.name, g.category, g.color,
+                   COUNT(gm.user_id)::int AS members,
+                   BOOL_OR(gm.user_id = %s) AS is_joined
+            FROM community_groups g
+            LEFT JOIN community_group_members gm ON g.id = gm.group_id
+            GROUP BY g.id, g.name, g.category, g.color
+            ORDER BY members DESC, g.id ASC;
+        """, (uid,))
+        groups = [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "category": r["category"],
+                "color": r["color"],
+                "members": int(r["members"] or 0),
+                "is_joined": bool(r["is_joined"]),
+            }
+            for r in cursor.fetchall()
+        ]
+
+        cursor.execute("""
+            SELECT e.id, e.title, e.event_date, e.event_time, e.description,
+                   COUNT(er.user_id)::int AS members,
+                   BOOL_OR(er.user_id = %s) AS is_rsvped
+            FROM community_events e
+            LEFT JOIN community_event_rsvps er ON e.id = er.event_id
+            GROUP BY e.id, e.title, e.event_date, e.event_time, e.description
+            ORDER BY e.id ASC;
+        """, (uid,))
+        events = [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "date": r["event_date"],
+                "time": r["event_time"],
+                "description": r["description"],
+                "members": int(r["members"] or 0),
+                "is_rsvped": bool(r["is_rsvped"]),
+            }
+            for r in cursor.fetchall()
+        ]
+
+        cursor.execute("SELECT tags FROM community_posts;")
+        tag_counts: Dict[str, int] = {}
+        for row in cursor.fetchall():
+            for t in (row["tags"] or []):
+                clean_t = str(t).strip()
+                if clean_t:
+                    tag_counts[clean_t] = tag_counts.get(clean_t, 0) + 1
+        trending = [
+            {"tag": tag, "count": cnt}
+            for tag, cnt in sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+        ]
+
+        return {
+            "stats": {
+                "members": members_count,
+                "connections": connections_count,
+                "discussions": discussions_count,
+                "mentors": mentors_count,
+            },
+            "groups": groups,
+            "events": events,
+            "trending": trending,
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/community/posts")
+def list_community_posts(
+    category: Optional[str] = "All",
+    sort_by: Optional[str] = "Latest",
+    search: Optional[str] = None,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT p.id, p.user_id, p.author_name, p.author_initials, p.author_role,
+                   p.category, p.title, p.content, p.tags, p.is_anonymous, p.created_at,
+                   u.avatar_url AS author_avatar,
+                   COUNT(DISTINCT pl.user_id)::int AS likes_count,
+                   COUNT(DISTINCT pb.user_id)::int AS saves_count,
+                   EXISTS(SELECT 1 FROM community_post_likes l2 WHERE l2.post_id = p.id AND l2.user_id = %s) AS liked,
+                   EXISTS(SELECT 1 FROM community_post_bookmarks b2 WHERE b2.post_id = p.id AND b2.user_id = %s) AS saved
+            FROM community_posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            LEFT JOIN community_post_likes pl ON p.id = pl.post_id
+            LEFT JOIN community_post_bookmarks pb ON p.id = pb.post_id
+            GROUP BY p.id, u.avatar_url
+            ORDER BY p.created_at DESC;
+        """, (uid, uid))
+        post_rows = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT c.id, c.post_id, c.user_id, c.author_name, c.author_initials, c.text, c.created_at,
+                   u.avatar_url AS author_avatar
+            FROM community_comments c
+            LEFT JOIN users u ON c.user_id = u.id
+            ORDER BY c.created_at ASC;
+        """)
+        comments_by_post: Dict[int, List[Dict[str, Any]]] = {}
+        for c in cursor.fetchall():
+            comments_by_post.setdefault(c["post_id"], []).append({
+                "id": c["id"],
+                "user_id": c["user_id"],
+                "author": c["author_name"],
+                "initials": c["author_initials"],
+                "author_avatar": c["author_avatar"],
+                "text": c["text"],
+                "created_at": c["created_at"].isoformat() if c["created_at"] else "",
+            })
+
+        posts = []
+        for r in post_rows:
+            comments = comments_by_post.get(r["id"], [])
+            item = {
+                "id": r["id"],
+                "user_id": r["user_id"],
+                "author": "Anonymous Member" if r["is_anonymous"] else r["author_name"],
+                "initials": "AM" if r["is_anonymous"] else r["author_initials"],
+                "author_avatar": None if r["is_anonymous"] else r["author_avatar"],
+                "role": "PrepNest Member" if r["is_anonymous"] else r["author_role"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else "",
+                "category": r["category"],
+                "title": r["title"],
+                "content": r["content"],
+                "likes": int(r["likes_count"] or 0),
+                "comments": comments,
+                "tags": r["tags"] or [],
+                "liked": bool(r["liked"]),
+                "saved": bool(r["saved"]),
+                "is_anonymous": bool(r["is_anonymous"]),
+            }
+            if category and category != "All":
+                if item["category"] != category and category not in item["tags"]:
+                    continue
+            if search and search.strip():
+                q = search.strip().lower()
+                hay = f"{item['title']} {item['content']} {item['author']} {' '.join(item['tags'])}".lower()
+                if q not in hay:
+                    continue
+            if sort_by == "Unanswered" and len(comments) > 0:
+                continue
+            posts.append(item)
+
+        if sort_by == "Popular":
+            posts.sort(key=lambda x: (-x["likes"], -len(x["comments"]), -x["id"]))
+
+        return {"posts": posts}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/posts")
+def create_community_post(
+    payload: CreateCommunityPostRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    title = payload.title.strip()
+    content = payload.content.strip()
+    if not title or not content:
+        raise HTTPException(status_code=400, detail="Title and content are required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT full_name, target_role, college, avatar_url FROM users WHERE id = %s;", (uid,))
+        u = cursor.fetchone()
+        author_name = (u["full_name"] if u and u.get("full_name") else "Student").strip()
+        initials = _format_initials(author_name)
+        role_label = (u.get("target_role") or u.get("college") or "PrepNest Member") if u else "PrepNest Member"
+        author_avatar = u.get("avatar_url") if u else None
+        tags = [t.strip() for t in (payload.tags or []) if str(t).strip()] or [payload.category]
+
+        cursor.execute("""
+            INSERT INTO community_posts
+            (user_id, author_name, author_initials, author_role, category, title, content, tags, is_anonymous)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, created_at;
+        """, (
+            uid,
+            author_name,
+            initials,
+            role_label,
+            payload.category,
+            title,
+            content,
+            json.dumps(tags),
+            bool(payload.is_anonymous),
+        ))
+        inserted = cursor.fetchone()
+        conn.commit()
+        return {
+            "id": inserted["id"],
+            "user_id": uid,
+            "author": "Anonymous Member" if payload.is_anonymous else author_name,
+            "initials": "AM" if payload.is_anonymous else initials,
+            "author_avatar": None if payload.is_anonymous else author_avatar,
+            "role": "PrepNest Member" if payload.is_anonymous else role_label,
+            "created_at": inserted["created_at"].isoformat(),
+            "category": payload.category,
+            "title": title,
+            "content": content,
+            "likes": 0,
+            "comments": [],
+            "tags": tags,
+            "liked": False,
+            "saved": False,
+            "is_anonymous": bool(payload.is_anonymous),
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/posts/{post_id}/like")
+def toggle_community_post_like(
+    post_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM community_post_likes WHERE user_id = %s AND post_id = %s;", (uid, post_id))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM community_post_likes WHERE user_id = %s AND post_id = %s;", (uid, post_id))
+            liked = False
+        else:
+            cursor.execute("INSERT INTO community_post_likes (user_id, post_id) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uid, post_id))
+            liked = True
+        cursor.execute("SELECT COUNT(*)::int AS c FROM community_post_likes WHERE post_id = %s;", (post_id,))
+        likes = int(cursor.fetchone()["c"])
+        conn.commit()
+        return {"post_id": post_id, "liked": liked, "likes": likes}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/posts/{post_id}/save")
+def toggle_community_post_save(
+    post_id: int,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM community_post_bookmarks WHERE user_id = %s AND post_id = %s;", (uid, post_id))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM community_post_bookmarks WHERE user_id = %s AND post_id = %s;", (uid, post_id))
+            saved = False
+        else:
+            cursor.execute("INSERT INTO community_post_bookmarks (user_id, post_id) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uid, post_id))
+            saved = True
+        conn.commit()
+        return {"post_id": post_id, "saved": saved}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/posts/{post_id}/comments")
+def add_community_comment(
+    post_id: int,
+    payload: CreateCommunityCommentRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM community_posts WHERE id = %s;", (post_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Discussion not found")
+        cursor.execute("SELECT full_name, avatar_url FROM users WHERE id = %s;", (uid,))
+        u = cursor.fetchone()
+        author_name = (u["full_name"] if u and u.get("full_name") else "Student").strip()
+        author_avatar = u.get("avatar_url") if u else None
+        initials = _format_initials(author_name)
+        cursor.execute("""
+            INSERT INTO community_comments (post_id, user_id, author_name, author_initials, text)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, created_at;
+        """, (post_id, uid, author_name, initials, text))
+        c = cursor.fetchone()
+        conn.commit()
+        return {
+            "id": c["id"],
+            "user_id": uid,
+            "author": author_name,
+            "initials": initials,
+            "author_avatar": author_avatar,
+            "text": text,
+            "created_at": c["created_at"].isoformat(),
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/groups/{group_id}/toggle-join")
+def toggle_group_join(group_id: int, authorization: Optional[str] = Header(None)):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM community_group_members WHERE user_id = %s AND group_id = %s;", (uid, group_id))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM community_group_members WHERE user_id = %s AND group_id = %s;", (uid, group_id))
+            is_joined = False
+        else:
+            cursor.execute("INSERT INTO community_group_members (user_id, group_id) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uid, group_id))
+            is_joined = True
+        cursor.execute("SELECT COUNT(*)::int AS c FROM community_group_members WHERE group_id = %s;", (group_id,))
+        members = int(cursor.fetchone()["c"])
+        conn.commit()
+        return {"group_id": group_id, "is_joined": is_joined, "members": members}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/events/{event_id}/toggle-rsvp")
+def toggle_event_rsvp(event_id: int, authorization: Optional[str] = Header(None)):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM community_event_rsvps WHERE user_id = %s AND event_id = %s;", (uid, event_id))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM community_event_rsvps WHERE user_id = %s AND event_id = %s;", (uid, event_id))
+            is_rsvped = False
+        else:
+            cursor.execute("INSERT INTO community_event_rsvps (user_id, event_id) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uid, event_id))
+            is_rsvped = True
+        cursor.execute("SELECT COUNT(*)::int AS c FROM community_event_rsvps WHERE event_id = %s;", (event_id,))
+        members = int(cursor.fetchone()["c"])
+        conn.commit()
+        return {"event_id": event_id, "is_rsvped": is_rsvped, "members": members}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/community/mentors")
+def list_community_mentors(authorization: Optional[str] = Header(None)):
+    uid = resolve_aptitude_user_id(authorization, None)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT skills, target_role, target_companies FROM users WHERE id = %s;", (uid,))
+        me = cursor.fetchone() or {}
+        my_skills = {s.lower() for s in _parse_skill_list(me.get("skills"))}
+        my_role = (me.get("target_role") or "").lower()
+
+        cursor.execute("""
+            SELECT u.id, u.full_name, u.email, u.avatar_url, u.target_role, u.target_companies,
+                   u.skills, u.college, u.degree, u.grad_year, u.location, u.bio,
+                   u.prep_level, u.total_xp, u.streak,
+                   COUNT(DISTINCT CASE WHEN dp.is_solved = TRUE THEN dp.problem_id END)::int AS dsa_solved,
+                   COUNT(DISTINCT rp.topic_id)::int AS roadmap_topics
+            FROM users u
+            LEFT JOIN user_dsa_progress dp ON u.id = dp.user_id
+            LEFT JOIN user_roadmap_progress rp ON u.id = rp.user_id AND rp.status = 'completed'
+            WHERE u.id != %s
+            GROUP BY u.id
+            ORDER BY u.total_xp DESC, u.id ASC;
+        """, (uid,))
+        rows = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT target_user_id, relation_type, status
+            FROM community_connections
+            WHERE user_id = %s;
+        """, (uid,))
+        conn_rows = cursor.fetchall()
+        connected_ids = [r["target_user_id"] for r in conn_rows if r["relation_type"] == "connect"]
+        mentorship_ids = [r["target_user_id"] for r in conn_rows if r["relation_type"] == "mentorship"]
+
+        mentors = []
+        for r in rows:
+            name = r["full_name"] or r["email"].split("@")[0]
+            skills = _parse_skill_list(r.get("skills"))
+            companies = _parse_skill_list(r.get("target_companies"))
+            target_role = r.get("target_role") or "Placement Aspirant"
+            prep_level = (r.get("prep_level") or "Intermediate").lower()
+
+            if prep_level == "advanced" or int(r.get("total_xp") or 0) >= 800:
+                member_type = "Alumni" if (r.get("grad_year") and int(r["grad_year"]) <= 2025) else "Senior"
+            else:
+                member_type = "Batchmate"
+
+            peer_skills = {s.lower() for s in skills}
+            overlap = len(my_skills & peer_skills) if my_skills and peer_skills else 0
+            union_cnt = len(my_skills | peer_skills) if (my_skills or peer_skills) else 1
+            role_bonus = 20 if (my_role and my_role in target_role.lower()) else 0
+            activity_bonus = min(30, (int(r.get("dsa_solved") or 0) * 5) + (int(r.get("total_xp") or 0) // 100))
+            match_pct = min(99, max(25, round((overlap / union_cnt) * 50) + role_bonus + activity_bonus))
+
+            mentors.append({
+                "id": r["id"],
+                "name": name,
+                "initials": _format_initials(name),
+                "avatar_url": r.get("avatar_url") or None,
+                "type": member_type,
+                "company": companies[0] if companies else (r.get("college") or "PrepNest"),
+                "role": target_role,
+                "experience": f"{r.get('total_xp') or 0} XP",
+                "branch": r.get("degree") or "Computer Science",
+                "graduation": str(r.get("grad_year") or "2026"),
+                "location": r.get("location") or "Remote",
+                "rating": round(min(5.0, 4.0 + min(1.0, (int(r.get("total_xp") or 0) / 1000.0))), 1),
+                "sessions": int(r.get("dsa_solved") or 0) + int(r.get("roadmap_topics") or 0),
+                "match": match_pct,
+                "skills": skills if skills else ["DSA", "Placement Prep"],
+                "available": int(r.get("streak") or 0) > 0 or int(r.get("total_xp") or 0) > 0,
+                "bio": r.get("bio") or f"{target_role} preparing with {int(r.get('dsa_solved') or 0)} DSA problems solved.",
+            })
+
+        return {
+            "mentors": mentors,
+            "connected_ids": connected_ids,
+            "mentorship_ids": mentorship_ids,
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/community/connections/{target_user_id}")
+def add_community_connection(
+    target_user_id: int,
+    payload: ConnectionActionRequest,
+    authorization: Optional[str] = Header(None)
+):
+    uid = resolve_aptitude_user_id(authorization, None)
+    rel = payload.relation_type if payload.relation_type in ("connect", "mentorship") else "connect"
+    if target_user_id == uid:
+        raise HTTPException(status_code=400, detail="Cannot connect with yourself")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        status_val = "connected" if rel == "connect" else "pending"
+        cursor.execute("""
+            INSERT INTO community_connections (user_id, target_user_id, relation_type, status)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, target_user_id, relation_type) DO NOTHING;
+        """, (uid, target_user_id, rel, status_val))
+        conn.commit()
+        return {"target_user_id": target_user_id, "relation_type": rel, "status": status_val}
+    finally:
+        cursor.close()
+        conn.close()
 
 
 if __name__ == "__main__":

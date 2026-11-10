@@ -1,13 +1,34 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PrepNest - AI Placement Preparation Platform</title>
-    <meta name="description" content="Production-ready SaaS for placement prep, DSA, and AI mock interviews." />
+    <title>PrepNest - Smart Placement Preparation Platform</title>
+    <meta name="description" content="Clean, minimal, professional developer placement preparation platform inspired by LeetCode." />
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('prepnest_theme');
+          var theme = saved === 'dark' ? 'dark' : 'light';
+          var root = document.documentElement;
+          root.setAttribute('data-theme', theme);
+          root.style.colorScheme = theme;
+          if (theme === 'dark') {
+            root.classList.add('dark');
+          } else {
+            root.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-slate-950 text-slate-100 antialiased font-sans">
+  <body class="font-sans antialiased selection:bg-[#FFA116]/25">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

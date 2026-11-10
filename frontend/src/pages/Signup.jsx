@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Sparkles, Mail, Lock, User as UserIcon, ArrowRight, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, ArrowRight, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { BlurDrop } from '@/components/ui/BlurDrop';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -44,69 +45,73 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Background Ambient Glows */}
-      <div className="absolute top-1/3 right-1/4 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-10 left-1/4 w-[400px] h-[400px] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
-
-      {/* Main Container Split View for Desktop */}
-      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 rounded-3xl border border-slate-800 bg-slate-900/60 backdrop-blur-2xl shadow-2xl overflow-hidden relative z-10">
+    <div className="min-h-screen bg-[#F7F8FA] text-[#262626] font-sans flex items-center justify-center p-4 md:p-6 selection:bg-[#FFA116] selection:text-white">
+      {/* Main Container Card */}
+      <BlurDrop className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 rounded-2xl border border-[#E5E7EB] bg-[#FFFFFF] shadow-sm overflow-hidden">
         
         {/* Left Side: Brand Perks Panel */}
-        <div className="p-8 lg:p-10 bg-gradient-to-br from-indigo-950/80 via-slate-900 to-slate-950 border-b lg:border-b-0 lg:border-r border-slate-800 flex flex-col justify-between space-y-8">
+        <div className="p-8 lg:p-10 bg-[#F7F8FA] border-b lg:border-b-0 lg:border-r border-[#E5E7EB] flex flex-col justify-between space-y-8">
           <div>
-            <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-2xl font-black text-white">
-                Prep<span className="text-indigo-400">Nest</span>
-              </span>
+            {/* Logo */}
+            <div className="mb-8">
+              <Link to="/">
+                <img
+                  src="/logo.png"
+                  alt="PrepNest - Prepare • Practice • Place"
+                  className="h-11 w-auto object-contain hover:opacity-90 transition-opacity"
+                />
+              </Link>
             </div>
 
-            <h2 className="text-2xl lg:text-3xl font-extrabold text-white leading-tight mb-4">
+            <h2 className="text-2xl lg:text-3xl font-extrabold text-[#262626] leading-tight mb-3">
               Join 12,400+ Candidates Getting Placement Ready
             </h2>
 
-            <p className="text-sm text-slate-400 leading-relaxed mb-6">
+            <p className="text-sm text-[#64748B] leading-relaxed mb-6">
               Create your account with Neon Authentication and start your personalized technical preparation roadmap today.
             </p>
 
             <div className="space-y-3 pt-2">
-              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <div className="flex items-center gap-3 text-xs font-semibold text-[#262626]">
+                <div className="w-5 h-5 rounded-full bg-[#E6FAF6] flex items-center justify-center flex-shrink-0">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#16A34A]" />
+                </div>
                 <span>Protected by Neon Authentication</span>
               </div>
-              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <div className="flex items-center gap-3 text-xs font-semibold text-[#262626]">
+                <div className="w-5 h-5 rounded-full bg-[#E6FAF6] flex items-center justify-center flex-shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" />
+                </div>
                 <span>Synchronized with Neon PostgreSQL Database</span>
               </div>
-              <div className="flex items-center gap-3 text-xs font-semibold text-slate-300">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <div className="flex items-center gap-3 text-xs font-semibold text-[#262626]">
+                <div className="w-5 h-5 rounded-full bg-[#E6FAF6] flex items-center justify-center flex-shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A]" />
+                </div>
                 <span>Free 250 AI Studio Diagnostic Credits Included</span>
               </div>
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs text-slate-400">
+          <div className="p-3.5 rounded-xl bg-[#FFFFFF] border border-[#E5E7EB] text-xs text-[#64748B]">
             <span>By registering, you agree to PrepNest's terms of service and community privacy policies.</span>
           </div>
         </div>
 
         {/* Right Side: Registration Form */}
-        <div className="p-8 lg:p-10 flex flex-col justify-center">
+        <div className="p-8 lg:p-10 flex flex-col justify-center bg-[#FFFFFF]">
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-1">
-              <h3 className="text-2xl font-bold text-white">Create Account</h3>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <h3 className="text-2xl font-bold text-[#262626]">Create Account</h3>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-[#E6FAF6] text-[#16A34A] border border-[#16A34A]/20">
                 Neon Auth
               </span>
             </div>
-            <p className="text-xs text-slate-400">Get instant access to your personalized dashboard</p>
+            <p className="text-xs text-[#64748B]">Get instant access to your personalized dashboard</p>
           </div>
 
           {error && (
-            <div className="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+            <div className="mb-5 p-3 rounded-xl bg-[#FFEBEF] border border-[#DC2626]/20 text-[#DC2626] text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{error}</span>
             </div>
@@ -114,52 +119,52 @@ export default function SignupPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs font-semibold text-[#262626] mb-1.5 uppercase tracking-wider">
                 Full Name
               </label>
               <div className="relative">
-                <UserIcon className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                <UserIcon className="w-4 h-4 text-[#64748B] absolute left-3.5 top-3.5" />
                 <input 
                   type="text" 
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Vivek Sharma"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-[#FFFFFF] border border-[#E5E7EB] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[#262626] placeholder-[#64748B]/60 focus:outline-none focus:border-[#FFA116] focus:ring-1 focus:ring-[#FFA116] transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs font-semibold text-[#262626] mb-1.5 uppercase tracking-wider">
                 Email Address
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                <Mail className="w-4 h-4 text-[#64748B] absolute left-3.5 top-3.5" />
                 <input 
                   type="email" 
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="student@university.edu"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-[#FFFFFF] border border-[#E5E7EB] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[#262626] placeholder-[#64748B]/60 focus:outline-none focus:border-[#FFA116] focus:ring-1 focus:ring-[#FFA116] transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs font-semibold text-[#262626] mb-1.5 uppercase tracking-wider">
                 Password
               </label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                <Lock className="w-4 h-4 text-[#64748B] absolute left-3.5 top-3.5" />
                 <input 
                   type="password" 
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-[#FFFFFF] border border-[#E5E7EB] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[#262626] placeholder-[#64748B]/60 focus:outline-none focus:border-[#FFA116] focus:ring-1 focus:ring-[#FFA116] transition-colors"
                 />
               </div>
             </div>
@@ -167,24 +172,24 @@ export default function SignupPage() {
             <button 
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-xl text-sm font-extrabold bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 text-white shadow-lg shadow-indigo-600/30 hover:opacity-95 transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer"
+              className="w-full py-3 rounded-xl text-sm font-semibold bg-[#FFA116] hover:bg-[#e69113] active:bg-[#cc8010] text-white shadow-sm transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Registering with Neon...' : 'Get Started Free'} <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          <div className="mt-6 text-center text-xs text-slate-400">
+          <div className="mt-6 text-center text-xs text-[#64748B]">
             Already have an account?{' '}
             <Link 
               to={`/login?redirect=${encodeURIComponent(redirectParam)}`} 
-              className="text-indigo-400 font-bold hover:underline"
+              className="text-[#FFA116] font-semibold hover:underline"
             >
               Sign In
             </Link>
           </div>
         </div>
 
-      </div>
+      </BlurDrop>
     </div>
   );
 }

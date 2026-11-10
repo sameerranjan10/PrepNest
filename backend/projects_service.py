@@ -208,7 +208,34 @@ def init_projects_tables(cursor):
         );
         CREATE INDEX IF NOT EXISTS idx_project_milestones_proj ON project_milestones(project_id);
         CREATE INDEX IF NOT EXISTS idx_project_milestones_user ON project_milestones(user_id);
+
+        CREATE TABLE IF NOT EXISTS project_ideas (
+            id VARCHAR(50) PRIMARY KEY,
+            title TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            difficulty VARCHAR(30) NOT NULL,
+            technologies JSONB NOT NULL DEFAULT '[]'::jsonb,
+            problem_statement TEXT NOT NULL,
+            skills_learned TEXT NOT NULL,
+            suggested_features JSONB NOT NULL DEFAULT '[]'::jsonb,
+            placement_relevance TEXT NOT NULL
+        );
     """)
+
+    cursor.execute("SELECT COUNT(*) as count FROM project_ideas;")
+    if cursor.fetchone()["count"] == 0:
+        for idea in CURATED_PROJECT_IDEAS:
+            cursor.execute("""
+                INSERT INTO project_ideas
+                (id, title, domain, difficulty, technologies, problem_statement, skills_learned, suggested_features, placement_relevance)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING;
+            """, (
+                idea["id"], idea["title"], idea["domain"], idea["difficulty"],
+                json.dumps(idea["technologies"]), idea["problem_statement"],
+                idea["skills_learned"], json.dumps(idea["suggested_features"]),
+                idea["placement_relevance"]
+            ))
 
 
 # -------------------------------------------------------------

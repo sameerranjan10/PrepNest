@@ -431,6 +431,18 @@ def init_db():
             daily_aptitude_goal INTEGER DEFAULT 1,
             prep_level TEXT DEFAULT 'Intermediate',
             email_notifications BOOLEAN DEFAULT TRUE,
+            career_objective TEXT,
+            department TEXT,
+            backlogs TEXT DEFAULT '0',
+            github_username TEXT,
+            other_links TEXT,
+            daily_study_hours REAL DEFAULT 2.0,
+            weekly_prep_goal TEXT,
+            prep_deadline TEXT,
+            preferred_subjects TEXT,
+            preferred_difficulty TEXT DEFAULT 'Medium',
+            streak_reminders BOOLEAN DEFAULT TRUE,
+            weekly_digest BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
@@ -465,6 +477,18 @@ def init_db():
         ("daily_aptitude_goal", "INTEGER DEFAULT 1"),
         ("prep_level", "TEXT DEFAULT 'Intermediate'"),
         ("email_notifications", "BOOLEAN DEFAULT TRUE"),
+        ("career_objective", "TEXT"),
+        ("department", "TEXT"),
+        ("backlogs", "TEXT DEFAULT '0'"),
+        ("github_username", "TEXT"),
+        ("other_links", "TEXT"),
+        ("daily_study_hours", "REAL DEFAULT 2.0"),
+        ("weekly_prep_goal", "TEXT"),
+        ("prep_deadline", "TEXT"),
+        ("preferred_subjects", "TEXT"),
+        ("preferred_difficulty", "TEXT DEFAULT 'Medium'"),
+        ("streak_reminders", "BOOLEAN DEFAULT TRUE"),
+        ("weekly_digest", "BOOLEAN DEFAULT TRUE"),
     ]
     for col_name, col_type in user_columns:
         try:
@@ -508,19 +532,49 @@ def init_db():
             answers_json TEXT NOT NULL,
             completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE aptitude_test_results ADD COLUMN IF NOT EXISTS assessment_id INTEGER;
+        ALTER TABLE aptitude_test_results ADD COLUMN IF NOT EXISTS accuracy REAL;
     """)
 
-    # 4. User Question Progress (Solved / Unsolved Tracker)
+    # 4. User Question Progress (Solved / Incorrect / Starred Tracker)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_question_progress (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL DEFAULT 1,
             question_id INTEGER NOT NULL,
-            status TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'unattempted',
             selected_option TEXT,
+            is_starred BOOLEAN NOT NULL DEFAULT FALSE,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, question_id)
         );
+        ALTER TABLE user_question_progress ADD COLUMN IF NOT EXISTS is_starred BOOLEAN NOT NULL DEFAULT FALSE;
+    """)
+
+    # 4b. Generated Timed Mock Assessments Lifecycle Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS aptitude_assessments (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'all',
+            difficulty TEXT NOT NULL DEFAULT 'all',
+            company TEXT NOT NULL DEFAULT 'all',
+            subtopic TEXT NOT NULL DEFAULT 'all',
+            timer_mode TEXT NOT NULL DEFAULT 'standard',
+            time_limit_seconds INTEGER NOT NULL DEFAULT 600,
+            question_ids JSONB NOT NULL,
+            saved_answers JSONB NOT NULL DEFAULT '{}'::jsonb,
+            marked_review JSONB NOT NULL DEFAULT '{}'::jsonb,
+            status TEXT NOT NULL DEFAULT 'in_progress',
+            started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            submitted_at TIMESTAMP WITH TIME ZONE
+        );
+        CREATE INDEX IF NOT EXISTS idx_apt_questions_cat_sub_diff ON aptitude_questions(category, subtopic, difficulty);
+        CREATE INDEX IF NOT EXISTS idx_apt_questions_company ON aptitude_questions(company_tag);
+        CREATE INDEX IF NOT EXISTS idx_uqp_user_status_star ON user_question_progress(user_id, status, is_starred);
+        CREATE INDEX IF NOT EXISTS idx_apt_results_user_date ON aptitude_test_results(user_id, completed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_apt_assessments_user_status ON aptitude_assessments(user_id, status);
     """)
 
     # 5. DSA Problems Table
@@ -763,6 +817,359 @@ def init_db():
         init_projects_tables(cursor)
     except Exception as e:
         print(f"[WARN] Projects table initialization error: {e}")
+
+    # 12. Company Tracks, Bookmarks, Mock Interview Bank & Community Tables
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS company_tracks (
+            slug VARCHAR(100) PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            category TEXT NOT NULL DEFAULT 'Product-Based',
+            logo TEXT DEFAULT '🏢',
+            role TEXT NOT NULL,
+            hiring_difficulty TEXT NOT NULL DEFAULT 'Medium',
+            assessment_type TEXT NOT NULL DEFAULT 'Aptitude + Coding',
+            rounds_count INTEGER NOT NULL DEFAULT 3,
+            description TEXT,
+            test_pattern TEXT,
+            sections JSONB NOT NULL DEFAULT '[]'::jsonb,
+            stages JSONB NOT NULL DEFAULT '[]'::jsonb,
+            experiences JSONB NOT NULL DEFAULT '[]'::jsonb,
+            is_upcoming BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS user_company_bookmarks (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            company_name TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, company_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_company_bookmarks_user ON user_company_bookmarks(user_id);
+
+        CREATE TABLE IF NOT EXISTS mock_interview_questions (
+            id SERIAL PRIMARY KEY,
+            category VARCHAR(50) NOT NULL,
+            question TEXT NOT NULL,
+            keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+            difficulty VARCHAR(20) DEFAULT 'Medium',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(category, question)
+        );
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS answers_json JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS total_questions INTEGER DEFAULT 0;
+        ALTER TABLE mock_interview_results ADD COLUMN IF NOT EXISTS attempted_count INTEGER DEFAULT 0;
+
+        CREATE TABLE IF NOT EXISTS community_posts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            author_name TEXT NOT NULL,
+            author_initials TEXT NOT NULL,
+            author_role TEXT NOT NULL DEFAULT 'Community Member',
+            category TEXT NOT NULL DEFAULT 'Placement',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+            is_anonymous BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_community_posts_created ON community_posts(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS community_comments (
+            id SERIAL PRIMARY KEY,
+            post_id INTEGER NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            author_name TEXT NOT NULL,
+            author_initials TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(post_id, created_at ASC);
+
+        CREATE TABLE IF NOT EXISTS community_post_likes (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            post_id INTEGER NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, post_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS community_post_bookmarks (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            post_id INTEGER NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, post_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS community_groups (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            category TEXT NOT NULL,
+            color TEXT DEFAULT 'orange',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS community_group_members (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER NOT NULL REFERENCES community_groups(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, group_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS community_events (
+            id SERIAL PRIMARY KEY,
+            title TEXT UNIQUE NOT NULL,
+            event_date TEXT NOT NULL,
+            event_time TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS community_event_rsvps (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, event_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS community_connections (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            target_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            relation_type VARCHAR(30) NOT NULL DEFAULT 'connect',
+            status VARCHAR(30) NOT NULL DEFAULT 'connected',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, target_user_id, relation_type)
+        );
+    """)
+
+    # Seed Company Tracks if empty
+    cursor.execute("SELECT COUNT(*) as count FROM company_tracks;")
+    if cursor.fetchone()["count"] == 0:
+        seed_company_tracks = [
+            (
+                "google", "Google", "Product-Based", "🌐", "Software Development Engineer (SDE)", "Hard", "Coding + DSA", 4,
+                "Global technology pioneer emphasizing deep algorithmic mastery, graph & dynamic programming intuition, clean scalable code, and Googleyness leadership traits.",
+                "OA: 2 Coding Problems (60 mins) + Technical & Analytical Assessment",
+                ["Data Structures", "Algorithms", "System Analytical Thinking"],
+                [
+                    {"stage": "Online Assessment", "detail": "2 Medium-Hard DSA coding tasks in 60-75 minutes"},
+                    {"stage": "Technical Phone Screen", "detail": "45-min live collaborative coding focused on optimal time/space"},
+                    {"stage": "Onsite Coding & System Rounds", "detail": "3 technical rounds on Trees, Graphs, DP & analytical design"},
+                    {"stage": "Googleyness & Behavioral", "detail": "Ambiguity navigation, collaboration, and ownership scenarios"}
+                ],
+                [
+                    {"role": "SDE-1 (University Grad)", "verdict": "Interview Pattern", "takeaway": "Questions emphasize Graph BFS/DFS variations and monotonic stacks alongside complexity tradeoffs."}
+                ],
+                False
+            ),
+            (
+                "microsoft", "Microsoft", "Product-Based", "🪟", "Software Engineer", "Medium", "Coding + DSA", 4,
+                "Enterprise cloud and developer ecosystem leader evaluating structured problem solving, object-oriented design, and core computer science fundamentals.",
+                "Codility OA: 3 Tasks (70 mins) + Analytical Aptitude",
+                ["Arrays & Strings", "Dynamic Programming", "Logical Reasoning"],
+                [
+                    {"stage": "Codility Online Assessment", "detail": "2-3 coding tasks (70 mins) + analytical reasoning"},
+                    {"stage": "Technical Interview 1", "detail": "Arrays, Strings, Linked Lists & tree manipulation"},
+                    {"stage": "Technical Interview 2", "detail": "LLD, OS/DBMS concepts & medium DP/Recursion"},
+                    {"stage": "AA (As Appropriate) Round", "detail": "Hiring manager architecture discussion & behavioral alignment"}
+                ],
+                [
+                    {"role": "Software Engineer (IDC)", "verdict": "Interview Pattern", "takeaway": "Strong focus on Linked Lists, Binary Trees, OOP modeling, multi-threading, and SQL indexing."}
+                ],
+                False
+            ),
+            (
+                "amazon", "Amazon", "Product-Based", "📦", "SDE-1 (Frontend / Backend)", "Hard", "Coding + DSA", 4,
+                "High-scale cloud and commerce engineering organization evaluating algorithmic efficiency alongside its Leadership Principles.",
+                "Online Assessment (OA1 + OA2): 2 Coding (70 mins) + Work Simulation & Aptitude",
+                ["Problem Solving", "Behavioral Leadership", "Data Structures"],
+                [
+                    {"stage": "OA1 & OA2", "detail": "2 DSA problems (70 mins) + Work Style & Leadership Simulation"},
+                    {"stage": "Technical Round 1", "detail": "2 live coding problems (Heaps, Trees, Hashing) + LP questions"},
+                    {"stage": "Technical Round 2", "detail": "Problem solving (Graphs/Greedy/DP) + OOP design"},
+                    {"stage": "Bar Raiser Round", "detail": "Cross-team senior engineer evaluating Leadership Principles & coding bar"}
+                ],
+                [
+                    {"role": "SDE-1 (AWS / Retail)", "verdict": "Interview Pattern", "takeaway": "Expect STAR-method Leadership Principle scenarios alongside Priority Queues, Trees, and Sliding Window."}
+                ],
+                False
+            ),
+            (
+                "tcs", "TCS", "Service-Based", "🏢", "Ninja / Digital / Prime Developer", "Medium", "Aptitude + Coding", 3,
+                "Enterprise IT services hiring across Ninja, Digital, and Prime tracks via the TCS NQT evaluation framework.",
+                "TCS NQT: Numerical (20Q, 25m) + Verbal (25Q, 25m) + Reasoning (20Q, 25m) + Coding (2Q, 45m)",
+                ["Quantitative Aptitude", "Reasoning Ability", "Verbal Ability", "Coding"],
+                [
+                    {"stage": "TCS NQT Foundation", "detail": "Numerical, Verbal, and Reasoning ability under strict section timers"},
+                    {"stage": "Advanced Coding Section", "detail": "2 hands-on coding problems (Arrays, Strings, Number Theory)"},
+                    {"stage": "Technical + HR Interview", "detail": "Core SQL, OOPs, C/Java/Python basics & project walkthrough"}
+                ],
+                [
+                    {"role": "TCS Prime / Digital", "verdict": "Interview Pattern", "takeaway": "Clearing both Advanced NQT coding questions pairs with DBMS normalization and API project review."}
+                ],
+                False
+            ),
+            (
+                "infosys", "Infosys", "Service-Based", "💼", "Systems Engineer / Specialist (DSE)", "Medium", "Aptitude + Coding", 2,
+                "Global consulting and IT services organization hiring Systems Engineers and Specialist Programmers with analytical and pseudocode rigor.",
+                "Infosys OA: Reasoning (15Q, 25m) + Mathematical (10Q, 35m) + Verbal (20Q, 20m) + Pseudocode (5Q, 10m)",
+                ["Mathematical Critical Thinking", "Logical Deduction", "Verbal Ability", "Pseudocode"],
+                [
+                    {"stage": "Infosys Online Test", "detail": "Reasoning, Mathematical Critical Thinking, Verbal & Pseudocode puzzles"},
+                    {"stage": "Technical & HR Interview", "detail": "OOP pillars, DBMS queries, SDLC, and final-year project discussion"}
+                ],
+                [
+                    {"role": "Specialist Programmer (SP)", "verdict": "Interview Pattern", "takeaway": "DP, Greedy, and Tree recursion dominate SP rounds; pseudocode tracing matters for Systems Engineer."}
+                ],
+                False
+            ),
+            (
+                "wipro", "Wipro", "Service-Based", "⚡", "Project Engineer / Turbo", "Medium", "Aptitude + Coding", 3,
+                "Multinational IT consulting organization conducting NLTH and Turbo hiring focused on aptitude fluency and foundational coding.",
+                "NLTH: Quantitative (16Q, 16m) + Logical (14Q, 14m) + Verbal (22Q, 18m) + Essay (1Q, 20m) + Coding (2Q, 60m)",
+                ["Quantitative Aptitude", "Logical Reasoning", "Verbal Ability", "Basic Coding"],
+                [
+                    {"stage": "Aptitude Assessment", "detail": "Quantitative, Logical Reasoning & Verbal Comprehension"},
+                    {"stage": "Written Essay + Coding", "detail": "Communication essay (20m) + 2 coding tasks (60m)"},
+                    {"stage": "Technical & HR Round", "detail": "Programming basics, DBMS joins & relocation readiness"}
+                ],
+                [],
+                False
+            ),
+            (
+                "cognizant", "Cognizant", "Service-Based", "💡", "GenC / GenC Next Developer", "Medium", "Aptitude + Coding", 3,
+                "Global technology transformation enterprise recruiting through GenC, GenC Elevate, and GenC Next developer tracks.",
+                "GenC Assessment: Quantitative (25Q, 35m) + Logical (20Q, 35m) + Verbal (20Q, 20m) + Coding",
+                ["Analytical Ability", "English Comprehension", "Domain Technical"],
+                [
+                    {"stage": "GenC Aptitude / Skill Test", "detail": "Quantitative, Analytical Reasoning & English Comprehension"},
+                    {"stage": "Technical / Coding Round", "detail": "SQL queries, Java/Python programming & debugging (GenC Next)"},
+                    {"stage": "Technical + HR Interview", "detail": "Core domain concepts, resume projects & communication check"}
+                ],
+                [],
+                False
+            ),
+            (
+                "accenture", "Accenture", "IT Consulting", "🚀", "Associate Software Engineer", "Medium", "Cognitive + Coding", 3,
+                "Strategy, consulting, and technology enterprise using cognitive, technical pseudocode, communication, and coding assessments.",
+                "Cognitive (50Q) + Technical (40Q) in 90 mins (Critical Thinking, English, Pseudocode, Cloud)",
+                ["Cognitive Assessment", "Technical & Pseudocode", "Coding (45m)"],
+                [
+                    {"stage": "Cognitive & Technical OA", "detail": "90-min elimination test covering Critical Thinking, Pseudocode & Cloud"},
+                    {"stage": "Coding Assessment", "detail": "45-min coding stage with 2 practical algorithmic tasks"},
+                    {"stage": "Communication & HR Interview", "detail": "Spoken assessment followed by collaborative project interview"}
+                ],
+                [],
+                False
+            ),
+            (
+                "capgemini", "Capgemini", "IT Consulting", "🔷", "Software Analyst", "Medium", "Cognitive + Coding", 3,
+                "European consulting and engineering organization featuring pseudocode testing and gamified cognitive assessments.",
+                "Capgemini OA: Pseudocode (30Q, 30m) + English (30Q, 30m) + Game-Based Aptitude (4 games) + Behavioral",
+                ["Pseudocode Analysis", "Verbal Ability", "Game-Based Aptitude"],
+                [
+                    {"stage": "Technical Pseudocode + English", "detail": "30Q Pseudocode (Data structures & bitwise logic) + 30Q Verbal"},
+                    {"stage": "Game-Based Aptitude", "detail": "4 interactive cognitive/pattern memory & spatial logic games"},
+                    {"stage": "Technical & HR Interview", "detail": "Coding fundamentals, behavioral fit & capstone project defense"}
+                ],
+                [],
+                False
+            ),
+            (
+                "deloitte", "Deloitte", "IT Consulting", "📊", "Technology Consulting Analyst", "Medium", "Aptitude + Coding", 3,
+                "Big Four technology and risk advisory practice seeking quantitative problem solvers with solid CS fundamentals.",
+                "Deloitte OA: Quantitative (15Q, 15m) + Logical (15Q, 15m) + Verbal (15Q, 15m) + Computer Fundamentals (30Q, 30m)",
+                ["Quantitative Analysis", "Logical Deduction", "Verbal Communication", "Computer Science"],
+                [
+                    {"stage": "Online Assessment", "detail": "Quant, Logical, Verbal + 30 Computer Science MCQs"},
+                    {"stage": "JAM / Case Discussion", "detail": "Structured articulation & consulting scenario analysis"},
+                    {"stage": "Technical + Partner Interview", "detail": "Data architecture, SQL, cloud basics & consulting case fit"}
+                ],
+                [],
+                False
+            ),
+            (
+                "meta", "Meta", "Product-Based", "♾️", "Software Engineer", "Extreme", "Coding + DSA", 4,
+                "Social and AI engineering platform valuing rapid algorithmic implementation and clean product engineering.",
+                "HackerRank OA: 2 Coding (45 mins) + System Design Fundamentals",
+                ["Speed Coding", "Graph Algorithms", "Data Structures"],
+                [
+                    {"stage": "Initial Technical Screen", "detail": "2 medium DSA questions within 45 minutes"},
+                    {"stage": "Coding Loop (2 Rounds)", "detail": "Speed coding on Strings, Graphs, Trees & Binary Search"},
+                    {"stage": "System / Product Architecture", "detail": "Scaling feeds, caching strategies & API boundaries"},
+                    {"stage": "Behavioral Round", "detail": "Conflict resolution, feedback culture & impact stories"}
+                ],
+                [],
+                True
+            ),
+            ("atlassian", "Atlassian", "Product-Based", "🏢", "Software Engineer", "Hard", "Coding + DSA", 4, "Collaborative developer tools leader.", "OA + System Design + Values Interview", ["Data Structures", "System Design"], [], [], True),
+            ("uber", "Uber", "Product-Based", "🏢", "Software Engineer", "Hard", "Coding + DSA", 4, "Mobility and real-time logistics platform.", "OA + Coding + Architecture", ["Graphs", "Concurrency"], [], [], True),
+            ("goldman sachs", "Goldman Sachs", "Product-Based", "🏢", "Engineering Analyst", "Hard", "Aptitude + Coding", 3, "Global investment banking engineering division.", "CoderPad + Quantitative Math", ["Probability", "DSA"], [], [], True),
+            ("cisco", "Cisco", "Product-Based", "🏢", "Software Engineer", "Medium", "Aptitude + Coding", 3, "Enterprise networking & security hardware/software.", "MCQ + 2 Coding Problems", ["Networking", "OS", "DSA"], [], [], True),
+            ("netflix", "Netflix", "Product-Based", "🏢", "Software Engineer", "Extreme", "Coding + DSA", 4, "High-scale media streaming architecture.", "System Architecture & Engineering Loops", ["Distributed Systems", "Backend"], [], [], True),
+            ("adobe", "Adobe", "Product-Based", "🏢", "Member of Technical Staff", "Hard", "Coding + DSA", 4, "Digital media and cloud experience software.", "Aptitude + Coding + CS Core", ["DSA", "OS", "Design Patterns"], [], [], True),
+        ]
+        for ct in seed_company_tracks:
+            cursor.execute("""
+                INSERT INTO company_tracks
+                (slug, name, category, logo, role, hiring_difficulty, assessment_type, rounds_count, description, test_pattern, sections, stages, experiences, is_upcoming)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (slug) DO NOTHING;
+            """, (
+                ct[0], ct[1], ct[2], ct[3], ct[4], ct[5], ct[6], ct[7],
+                ct[8], ct[9], json.dumps(ct[10]), json.dumps(ct[11]), json.dumps(ct[12]), ct[13]
+            ))
+
+    # Seed Mock Interview Questions if empty
+    cursor.execute("SELECT COUNT(*) as count FROM mock_interview_questions;")
+    if cursor.fetchone()["count"] == 0:
+        seed_interview_qs = [
+            ("Technical", "Explain the difference between optimistic concurrency control and pessimistic locking in database architecture.", ["optimistic", "pessimistic", "locking", "transaction", "concurrency"], "Medium"),
+            ("Technical", "What is the difference between a process and a thread?", ["process", "thread", "memory", "execution", "resource"], "Easy"),
+            ("Technical", "What is REST API and what are the main HTTP methods used in REST?", ["rest", "api", "http", "get", "post", "put", "delete"], "Easy"),
+            ("Technical", "Explain the concept of normalization in databases and why it is useful.", ["normalization", "database", "redundancy", "normal form", "data"], "Medium"),
+            ("Technical", "What is the difference between authentication and authorization?", ["authentication", "authorization", "identity", "permission", "access"], "Easy"),
+            ("HR", "Tell me about yourself and explain why you are interested in this role.", ["education", "experience", "skills", "project", "career"], "Easy"),
+            ("HR", "What is your biggest strength and how has it helped you?", ["strength", "example", "experience", "result"], "Easy"),
+            ("HR", "Tell me about a difficult problem you faced and how you solved it.", ["problem", "solution", "challenge", "result", "learn"], "Medium"),
+            ("HR", "Where do you see yourself in the next five years?", ["career", "growth", "skills", "experience", "goal"], "Easy"),
+            ("HR", "Why should we hire you?", ["skills", "experience", "value", "team", "contribute"], "Medium"),
+            ("Behavioral", "Tell me about a time when you worked as part of a team.", ["team", "communication", "responsibility", "result"], "Easy"),
+            ("Behavioral", "Describe a situation where you had to meet a tight deadline.", ["deadline", "planning", "priority", "result"], "Medium"),
+            ("Behavioral", "Tell me about a mistake you made and what you learned from it.", ["mistake", "learn", "improve", "experience"], "Medium"),
+            ("Behavioral", "How do you handle disagreement with a teammate?", ["communication", "listen", "discussion", "solution", "team"], "Medium"),
+            ("Behavioral", "Describe a situation where you demonstrated leadership.", ["leadership", "team", "decision", "responsibility", "result"], "Medium"),
+        ]
+        for cat, qtext, kws, diff in seed_interview_qs:
+            cursor.execute("""
+                INSERT INTO mock_interview_questions (category, question, keywords, difficulty)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (category, question) DO NOTHING;
+            """, (cat, qtext, json.dumps(kws), diff))
+
+    # Seed Community Structural Groups & Events if empty (counts come from real member/rsvp tables)
+    cursor.execute("SELECT COUNT(*) as count FROM community_groups;")
+    if cursor.fetchone()["count"] == 0:
+        for gname, gcat, gcol in [
+            ("DSA Daily", "DSA", "indigo"),
+            ("Placement 2026", "Placement", "purple"),
+            ("Aptitude Warriors", "Aptitude", "emerald"),
+            ("Frontend Developers", "Development", "cyan"),
+        ]:
+            cursor.execute(
+                "INSERT INTO community_groups (name, category, color) VALUES (%s, %s, %s) ON CONFLICT (name) DO NOTHING;",
+                (gname, gcat, gcol)
+            )
+
+    cursor.execute("SELECT COUNT(*) as count FROM community_events;")
+    if cursor.fetchone()["count"] == 0:
+        for etitle, edate, etime, edesc in [
+            ("Mock Interview Night", "Weekly Thu", "7:00 PM", "Peer & AI structured technical interview practice"),
+            ("Resume Review Session", "Weekly Sat", "6:30 PM", "ATS critique and project bullet workshop"),
+            ("DSA Problem Solving", "Daily", "8:00 PM", "Timed algorithm problem discussion"),
+        ]:
+            cursor.execute(
+                "INSERT INTO community_events (title, event_date, event_time, description) VALUES (%s, %s, %s, %s) ON CONFLICT (title) DO NOTHING;",
+                (etitle, edate, etime, edesc)
+            )
 
     conn.commit()
     cursor.close()
