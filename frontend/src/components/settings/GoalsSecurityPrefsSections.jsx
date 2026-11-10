@@ -56,7 +56,7 @@ export function PreparationGoalsSection({
           </p>
         </div>
 
-        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFF8EE] dark:bg-[#FFA116]/12 border border-[#F59E0B]/30 text-[11px] font-semibold text-[#D97706] dark:text-[#FFA116] shrink-0">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FFF8EE] dark:bg-[#FFA116]/15 border border-[#F59E0B]/30 text-[11px] font-semibold text-[#D97706] dark:text-[#FFA116] shrink-0">
           <Sparkles className="w-3.5 h-3.5" />
           <span>Synced with AI Placement Mentor</span>
         </div>

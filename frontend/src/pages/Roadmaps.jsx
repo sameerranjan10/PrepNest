@@ -430,9 +430,8 @@ export default function RoadmapsPage() {
         <Header defaultCollapsed />
 
         {initialLoading ? (
-          <main className="flex-1 p-6 w-full flex flex-col items-center justify-center gap-2">
-            <LoadingSpinner size="lg" />
-            <p className="text-sm text-[#64748B]">Loading Learning Centre curriculum...</p>
+          <main className="flex-1 p-6 w-full flex flex-col items-center justify-center">
+            <LoadingSpinner size="lg" message="Loading your learning tracks..." />
           </main>
         ) : !selectedDomainId ? (
           <BlurDrop

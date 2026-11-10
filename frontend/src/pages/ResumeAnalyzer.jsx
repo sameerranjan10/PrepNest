@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 import { BlurDrop } from '@/components/ui/BlurDrop';
+import { ButtonLoader, ComponentLoader } from '@/components/ui/PrepNestLoader';
 import {
   UploadCloud,
   CheckCircle2,
@@ -486,7 +487,7 @@ export default function ResumeAnalyzerPage() {
               >
                 <div className="w-12 h-12 rounded-xl bg-[#FFF8EE] text-[#FFA116] flex items-center justify-center">
                   {analyzing ? (
-                    <RefreshCw className="w-6 h-6 animate-spin text-[#FFA116]" />
+                    <ButtonLoader size="md" tone="brand" label="Analyzing document" />
                   ) : (
                     <UploadCloud className="w-6 h-6" />
                   )}
@@ -566,9 +567,8 @@ export default function ResumeAnalyzerPage() {
             {/* Right: Scores Overview & Dimension Breakdown */}
             <div className="lg:col-span-2 space-y-4">
               {loadingLatest ? (
-                <Card className="p-8 flex items-center justify-center gap-2 text-xs text-[#64748B]">
-                  <RefreshCw className="w-4 h-4 animate-spin text-[#FFA116]" />
-                  <span>Checking your saved resume audit...</span>
+                <Card className="p-6">
+                  <ComponentLoader size="sm" message="Checking your saved resume audit..." />
                 </Card>
               ) : !analysis ? (
                 <Card className="p-8 flex flex-col items-center justify-center text-center space-y-3 h-full min-h-[260px]">

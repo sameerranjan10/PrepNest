@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ComponentLoader } from '@/components/ui/PrepNestLoader';
 import {
   X,
   Play,
@@ -336,9 +337,8 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
 
         {/* Content Body: Split View (Left: Description/Tutorial, Right: Code Playground) */}
         {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[#64748B]">
-            <div className="w-6 h-6 border-2 border-[#FFA116] border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs font-medium">Loading problem details...</span>
+          <div className="flex-1 flex items-center justify-center">
+            <ComponentLoader size="sm" message="Loading problem details..." />
           </div>
         ) : (
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E5E7EB] overflow-hidden">

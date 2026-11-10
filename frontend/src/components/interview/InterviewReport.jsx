@@ -67,7 +67,7 @@ export function InterviewReport({
                   {sessionMeta.company_name}
                 </span>
               )}
-              <span className="px-2.5 py-1 rounded-full bg-[#FFFBEB] dark:bg-[#F59E0B]/12 border border-[#F59E0B]/30 text-xs font-semibold text-[#B45309] dark:text-[#FBBF24] capitalize">
+              <span className="px-2.5 py-1 rounded-full bg-[#FFFBEB] dark:bg-[#F59E0B]/15 border border-[#F59E0B]/30 text-xs font-semibold text-[#B45309] dark:text-[#FBBF24] capitalize">
                 {sessionMeta?.category} · {sessionMeta?.mode} · {sessionMeta?.personality}
               </span>
             </div>

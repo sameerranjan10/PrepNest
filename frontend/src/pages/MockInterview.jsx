@@ -24,7 +24,6 @@ import {
   MessageSquare,
   RefreshCw,
   AlertCircle,
-  Loader2,
   Briefcase,
   Layers,
   Send,
@@ -32,6 +31,7 @@ import {
   Sparkles,
   BrainCircuit,
 } from "lucide-react";
+import { ButtonLoader } from "@/components/ui/PrepNestLoader";
 
 export default function MockInterviewPage() {
   const { user } = useAuth();
@@ -862,7 +862,7 @@ export default function MockInterviewPage() {
                       {/* AI Thinking Overlay Pill */}
                       {isSubmittingTurn && (
                         <div className="absolute top-3 left-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/70 backdrop-blur-md border border-[#F59E0B]/40 text-xs font-semibold text-white">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[#F59E0B]" />
+                          <ButtonLoader size="xs" tone="brand" label="AI Interviewer thinking" />
                           <span>AI Interviewer thinking...</span>
                         </div>
                       )}
@@ -957,7 +957,7 @@ export default function MockInterviewPage() {
                         </span>
                       )}
                       {prompt.question_difficulty && (
-                        <span className="px-2.5 py-0.5 rounded-full bg-[#FFFBEB] dark:bg-[#F59E0B]/12 border border-[#F59E0B]/30 text-[11px] font-semibold text-[#B45309] dark:text-[#FBBF24]">
+                        <span className="px-2.5 py-0.5 rounded-full bg-[#FFFBEB] dark:bg-[#F59E0B]/15 border border-[#F59E0B]/30 text-[11px] font-semibold text-[#B45309] dark:text-[#FBBF24]">
                           {prompt.question_difficulty}
                         </span>
                       )}
@@ -1002,7 +1002,7 @@ export default function MockInterviewPage() {
                     )}
 
                     {session.mode === "practice" && hintText && (
-                      <div className="p-3.5 rounded-xl bg-[#FFFBEB] dark:bg-[#F59E0B]/12 border border-[#F59E0B]/30 text-xs text-[#B45309] dark:text-[#FBBF24] flex items-start gap-2">
+                      <div className="p-3.5 rounded-xl bg-[#FFFBEB] dark:bg-[#F59E0B]/15 border border-[#F59E0B]/30 text-xs text-[#B45309] dark:text-[#FBBF24] flex items-start gap-2">
                         <Lightbulb className="w-4 h-4 shrink-0 mt-0.5 text-[#F59E0B]" />
                         <div>
                           <span className="font-bold block">Coaching Hint</span>
@@ -1099,7 +1099,7 @@ export default function MockInterviewPage() {
                             className="inline-flex items-center gap-1.5 bg-[#FFFBEB] dark:bg-[#F59E0B]/15 hover:bg-[#FEF3C7] text-[#B45309] dark:text-[#FBBF24] border border-[#F59E0B]/30 text-xs font-semibold px-3.5 py-2.5 rounded-xl transition cursor-pointer disabled:opacity-50"
                           >
                             {isLoadingHint ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <ButtonLoader size="xs" tone="brand" label="Fetching hint" />
                             ) : (
                               <Lightbulb className="w-3.5 h-3.5" />
                             )}
@@ -1142,7 +1142,7 @@ export default function MockInterviewPage() {
                         >
                           {isSubmittingTurn ? (
                             <>
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <ButtonLoader size="xs" tone="light" label="AI analyzing response" />
                               <span>AI Analyzing...</span>
                             </>
                           ) : session.current_phase === "introduction" ? (
@@ -1178,7 +1178,7 @@ export default function MockInterviewPage() {
                           className="inline-flex items-center gap-1.5 bg-[#FFFFFF] dark:bg-[#161B22] hover:bg-[#FEF2F2] text-[#64748B] hover:text-[#DC2626] text-xs font-medium px-3 py-2.5 rounded-xl border border-[#E2E8F0] dark:border-[#30363D] transition cursor-pointer"
                         >
                           {isFinishing ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <ButtonLoader size="xs" tone="brand" label="Generating report" />
                           ) : (
                             <Square className="w-3.5 h-3.5" />
                           )}
@@ -1344,7 +1344,7 @@ export default function MockInterviewPage() {
                             key={t.turn_number}
                             className={`p-3 rounded-xl border text-xs space-y-1 ${
                               isLatest
-                                ? "bg-[#FFFBEB] dark:bg-[#F59E0B]/12 border-[#F59E0B]/40"
+                                ? "bg-[#FFFBEB] dark:bg-[#F59E0B]/15 border-[#F59E0B]/40"
                                 : "bg-[#F8FAFC] dark:bg-[#0D1117]/70 border-[#E2E8F0] dark:border-[#30363D]"
                             }`}
                           >

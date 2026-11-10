@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 import { BlurDrop } from '@/components/ui/BlurDrop';
+import { ComponentLoader } from '@/components/ui/PrepNestLoader';
 import { useAuth } from '@/context/AuthContext';
 import {
   FolderGit2,
@@ -1998,12 +1999,7 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
             {/* Body */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
               {interviewPrepLoading ? (
-                <div className="p-12 text-center space-y-3">
-                  <RefreshCw className="w-8 h-8 text-[#FFA116] animate-spin mx-auto" />
-                  <p className="text-[#64748B] text-xs">
-                    Synthesizing interview explanations and targeted questions...
-                  </p>
-                </div>
+                <ComponentLoader size="md" message="Fetching interview questions..." />
               ) : interviewPrepData ? (
                 <>
                   {/* PROJECT EXPLANATION PITCHES */}
@@ -2155,10 +2151,7 @@ ${(p.key_features || []).map((f) => `- ${f}`).join('\n')}
 
             <div className="p-6 space-y-4 text-xs">
               {resumeBulletsLoading ? (
-                <div className="p-8 text-center">
-                  <RefreshCw className="w-6 h-6 text-[#FFA116] animate-spin mx-auto mb-2" />
-                  <p className="text-[#64748B] text-xs">Generating ATS resume bullet points...</p>
-                </div>
+                <ComponentLoader size="sm" message="Generating ATS resume bullet points..." />
               ) : resumeData ? (
                 <>
                   <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-[#E5E7EB] text-[#262626]">
