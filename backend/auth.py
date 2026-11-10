@@ -1,9 +1,16 @@
+import os
+import secrets
 import jwt
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
+from dotenv import load_dotenv
 
-SECRET_KEY = "super-secret-key-ai-studio-saas-antigravity"
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(_env_path, override=True)
+load_dotenv(override=True)
+
+SECRET_KEY = (os.getenv("SECRET_KEY") or "").strip() or secrets.token_urlsafe(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
@@ -37,15 +44,11 @@ def decode_access_token(token: str) -> Optional[dict]:
 # Neon Authentication Integration (Managed Better Auth)
 # -------------------------------------------------------------
 
-import os
 import json
 import urllib.request
 import urllib.error
 
-NEON_AUTH_URL = os.getenv(
-    "NEON_AUTH_URL",
-    "https://ep-purple-lab-b3uwg1re.neonauth.c-4.ap-southeast-1.aws.neon.tech/neondb/auth"
-).rstrip("/")
+NEON_AUTH_URL = (os.getenv("NEON_AUTH_URL") or "").strip().rstrip("/")
 
 
 def neon_auth_sign_up(name: str, email: str, password: str, origin: Optional[str] = None) -> tuple[bool, Optional[dict], Optional[str]]:
@@ -53,6 +56,8 @@ def neon_auth_sign_up(name: str, email: str, password: str, origin: Optional[str
     Registers a new user via Neon Auth (/sign-up/email).
     Returns (success, response_data, error_message).
     """
+    if not NEON_AUTH_URL:
+        return False, None, "NEON_AUTH_URL is not configured in environment"
     url = f"{NEON_AUTH_URL}/sign-up/email"
     payload = json.dumps({
         "name": name,
@@ -90,6 +95,8 @@ def neon_auth_sign_in(email: str, password: str, origin: Optional[str] = None) -
     Authenticates a user via Neon Auth (/sign-in/email).
     Returns (success, response_data, error_message).
     """
+    if not NEON_AUTH_URL:
+        return False, None, "NEON_AUTH_URL is not configured in environment"
     url = f"{NEON_AUTH_URL}/sign-in/email"
     payload = json.dumps({
         "email": email.lower().strip(),
