@@ -110,6 +110,18 @@ def init_gamification_tables(cursor):
         ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_date DATE;
     """)
 
+    # 5. User Achievements Table (No duplicates via UNIQUE(user_id, achievement_key))
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_achievements (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            achievement_key VARCHAR(60) NOT NULL,
+            unlocked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, achievement_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_achievements_user ON user_achievements(user_id);
+    """)
+
 
 def calculate_streak(user_id: int, cursor) -> int:
     """
@@ -322,28 +334,229 @@ def award_xp(
     }
 
 
-def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, cursor = None) -> Dict[str, Any]:
+ACHIEVEMENT_DEFINITIONS = [
+    {
+        "key": "first_problem",
+        "title": "First Problem Solved",
+        "description": "Solve your very first DSA or Aptitude problem on PrepNest.",
+        "target": 1,
+    },
+    {
+        "key": "streak_7",
+        "title": "7-Day Streak",
+        "description": "Maintain 7 consecutive days of active placement preparation.",
+        "target": 7,
+    },
+    {
+        "key": "streak_30",
+        "title": "30-Day Streak",
+        "description": "Maintain a 30-day consecutive preparation streak.",
+        "target": 30,
+    },
+    {
+        "key": "dsa_50",
+        "title": "50 DSA Problems",
+        "description": "Solve 50 unique DSA problems in the directory.",
+        "target": 50,
+    },
+    {
+        "key": "dsa_100",
+        "title": "100 DSA Problems",
+        "description": "Solve 100 unique DSA problems in the directory.",
+        "target": 100,
+    },
+    {
+        "key": "roadmap_completed",
+        "title": "Roadmap Completed",
+        "description": "Complete every topic in at least one full learning roadmap track.",
+        "target": 1,
+    },
+    {
+        "key": "interview_ready",
+        "title": "Interview Ready",
+        "description": "Reach a Placement Readiness score of 75% or higher.",
+        "target": 75,
+    },
+]
+
+
+def _sync_and_get_achievements(
+    user_id: int,
+    dsa_solved: int,
+    apt_solved: int,
+    streak: int,
+    readiness: int,
+    domains_completed: int,
+    cursor,
+) -> List[Dict[str, Any]]:
     """
-    Produces the single-source-of-truth Leaderboard payload.
+    Evaluates real criteria, records newly unlocked achievements without duplicates,
+    and returns both unlocked and locked achievement statuses.
+    """
+    if not user_id:
+        return []
+
+    progress_map = {
+        "first_problem": min(1, int(dsa_solved) + int(apt_solved)),
+        "streak_7": min(7, int(streak)),
+        "streak_30": min(30, int(streak)),
+        "dsa_50": min(50, int(dsa_solved)),
+        "dsa_100": min(100, int(dsa_solved)),
+        "roadmap_completed": min(1, int(domains_completed)),
+        "interview_ready": min(75, int(readiness)),
+    }
+
+    for ach in ACHIEVEMENT_DEFINITIONS:
+        key = ach["key"]
+        if progress_map.get(key, 0) >= ach["target"]:
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO user_achievements (user_id, achievement_key)
+                    VALUES (%s, %s)
+                    ON CONFLICT (user_id, achievement_key) DO NOTHING;
+                    """,
+                    (user_id, key),
+                )
+            except Exception:
+                pass
+
+    unlocked_map: Dict[str, str] = {}
+    try:
+        cursor.execute(
+            "SELECT achievement_key, unlocked_at FROM user_achievements WHERE user_id = %s;",
+            (user_id,),
+        )
+        for row in cursor.fetchall():
+            unlocked_map[row["achievement_key"]] = (
+                row["unlocked_at"].isoformat() if row.get("unlocked_at") else ""
+            )
+    except Exception:
+        pass
+
+    result = []
+    for ach in ACHIEVEMENT_DEFINITIONS:
+        key = ach["key"]
+        prog = progress_map.get(key, 0)
+        is_unlocked = key in unlocked_map or prog >= ach["target"]
+        result.append({
+            "key": key,
+            "title": ach["title"],
+            "description": ach["description"],
+            "unlocked": is_unlocked,
+            "unlocked_at": unlocked_map.get(key),
+            "progress": prog,
+            "target": ach["target"],
+        })
+    return result
+
+
+def _compute_real_rank_history(current_user_id: int, cursor) -> List[Dict[str, Any]]:
+    """
+    Derives actual historical rank and cumulative XP progression strictly from recorded
+    xp_transactions dates in PostgreSQL. Returns [] if fewer than 2 real activity dates exist.
+    """
+    try:
+        cursor.execute("""
+            SELECT DISTINCT (created_at AT TIME ZONE 'UTC')::date AS tx_date
+            FROM xp_transactions
+            WHERE user_id = %s
+            ORDER BY tx_date DESC
+            LIMIT 14;
+        """, (current_user_id,))
+        user_dates = sorted([r["tx_date"] for r in cursor.fetchall() if r.get("tx_date")])
+        if len(user_dates) < 2:
+            return []
+
+        cursor.execute("""
+            SELECT user_id, (created_at AT TIME ZONE 'UTC')::date AS tx_date, SUM(amount)::int AS day_xp
+            FROM xp_transactions
+            GROUP BY user_id, (created_at AT TIME ZONE 'UTC')::date;
+        """)
+        tx_rows = cursor.fetchall()
+        if not tx_rows:
+            return []
+
+        user_totals: Dict[int, Dict[date, int]] = {}
+        for r in tx_rows:
+            uid = int(r["user_id"])
+            user_totals.setdefault(uid, {})[r["tx_date"]] = int(r["day_xp"] or 0)
+
+        history = []
+        for d in user_dates:
+            standings = []
+            for uid, day_map in user_totals.items():
+                cum = sum(val for dt, val in day_map.items() if dt <= d)
+                if cum > 0 or uid == current_user_id:
+                    standings.append((uid, cum))
+            standings.sort(key=lambda item: (-item[1], item[0]))
+            rank_on_day = next((idx + 1 for idx, item in enumerate(standings) if item[0] == current_user_id), len(standings))
+            cum_xp = sum(val for dt, val in user_totals.get(current_user_id, {}).items() if dt <= d)
+            day_xp = user_totals.get(current_user_id, {}).get(d, 0)
+            history.append({
+                "date": d.isoformat(),
+                "label": d.strftime("%b %d"),
+                "rank": rank_on_day,
+                "cumulative_xp": cum_xp,
+                "daily_xp": day_xp,
+            })
+        return history
+    except Exception as e:
+        print(f"[WARN] _compute_real_rank_history error: {e}")
+        return []
+
+
+def get_leaderboard_data(
+    period: str = "overall",
+    current_user_id: int = 1,
+    cursor = None,
+    batch: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Produces the single-source-of-truth Leaderboard payload from actual PostgreSQL records.
     Supports:
-      - 'weekly': XP earned in last 7 days
-      - 'monthly': XP earned in last 30 days
-      - 'overall': Total accumulated XP
-    Deterministic tie-breaking: 1) XP, 2) Problems Solved, 3) Streak, 4) Earliest activity, 5) user_id.
+      - 'weekly': Rolling 7 days (PostgreSQL CURRENT_TIMESTAMP - 7 days, UTC)
+      - 'monthly': Rolling 30 days (PostgreSQL CURRENT_TIMESTAMP - 30 days, UTC)
+      - 'overall': All accumulated activity (UTC)
+    Optional 'batch' filter restricts leaderboard to a specific graduation year (e.g. '2026').
     """
     period_lower = (period or "overall").lower().strip()
     if period_lower not in ["weekly", "monthly", "overall"]:
         period_lower = "overall"
 
-    # Define date filter condition
+    batch_clean = str(batch).strip() if batch else None
+    if batch_clean and batch_clean.lower() in ("all", "none", ""):
+        batch_clean = None
+
     if period_lower == "weekly":
-        date_filter_raw = "AND t.created_at >= CURRENT_DATE - INTERVAL '7 days'"
+        date_filter_raw = "AND t.created_at >= (CURRENT_TIMESTAMP - INTERVAL '7 days')"
+        prev_filter_raw = "AND t.created_at >= (CURRENT_TIMESTAMP - INTERVAL '14 days') AND t.created_at < (CURRENT_TIMESTAMP - INTERVAL '7 days')"
+        period_label = "Rolling last 7 days (UTC)"
     elif period_lower == "monthly":
-        date_filter_raw = "AND t.created_at >= CURRENT_DATE - INTERVAL '30 days'"
+        date_filter_raw = "AND t.created_at >= (CURRENT_TIMESTAMP - INTERVAL '30 days')"
+        prev_filter_raw = "AND t.created_at >= (CURRENT_TIMESTAMP - INTERVAL '60 days') AND t.created_at < (CURRENT_TIMESTAMP - INTERVAL '30 days')"
+        period_label = "Rolling last 30 days (UTC)"
     else:
         date_filter_raw = ""
+        prev_filter_raw = None
+        period_label = "All accumulated activity (UTC)"
 
-    # Aggregate XP per user for period
+    # Fetch distinct real graduation batches
+    cursor.execute("""
+        SELECT DISTINCT grad_year
+        FROM users
+        WHERE grad_year IS NOT NULL
+        ORDER BY grad_year ASC;
+    """)
+    available_batches = [str(r["grad_year"]) for r in cursor.fetchall() if r.get("grad_year")]
+
+    batch_where_sql = ""
+    params: List[Any] = []
+    if batch_clean and batch_clean.isdigit():
+        batch_where_sql = "WHERE u.grad_year = %s"
+        params.append(int(batch_clean))
+
+    # Aggregate XP, DSA solved, Aptitude solved, Roadmap topics completed per user
     query = f"""
         WITH user_period_xp AS (
             SELECT 
@@ -351,19 +564,37 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
                 u.full_name,
                 u.email,
                 u.target_role,
+                u.grad_year,
+                COALESCE(u.college, '') as college,
                 COALESCE(u.avatar_url, '') as avatar_url,
                 COALESCE(SUM(t.amount), 0)::int as period_xp,
                 MIN(t.created_at) as earliest_activity
             FROM users u
             LEFT JOIN xp_transactions t ON u.id = t.user_id {date_filter_raw}
-            GROUP BY u.id, u.full_name, u.email, u.target_role, u.avatar_url
+            {batch_where_sql}
+            GROUP BY u.id, u.full_name, u.email, u.target_role, u.grad_year, u.college, u.avatar_url
+        ),
+        user_all_xp AS (
+            SELECT user_id, COALESCE(SUM(amount), 0)::int AS lifetime_xp
+            FROM xp_transactions
+            GROUP BY user_id
         ),
         user_problems AS (
-            SELECT 
-                user_id,
-                COUNT(DISTINCT problem_id)::int as solved_problems
+            SELECT user_id, COUNT(DISTINCT problem_id)::int as solved_problems
             FROM user_dsa_progress
             WHERE is_solved = true
+            GROUP BY user_id
+        ),
+        user_aptitude AS (
+            SELECT user_id, COUNT(DISTINCT question_id)::int as solved_aptitude
+            FROM user_question_progress
+            WHERE status = 'solved'
+            GROUP BY user_id
+        ),
+        user_roadmap AS (
+            SELECT user_id, COUNT(DISTINCT topic_id)::int as completed_roadmap
+            FROM user_roadmap_progress
+            WHERE status = 'completed'
             GROUP BY user_id
         )
         SELECT 
@@ -371,19 +602,46 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             x.full_name,
             x.email,
             x.target_role,
+            x.grad_year,
+            x.college,
             x.avatar_url,
             x.period_xp,
+            COALESCE(ax.lifetime_xp, 0) as lifetime_xp,
             x.earliest_activity,
-            COALESCE(p.solved_problems, 0) as problems_solved
+            COALESCE(p.solved_problems, 0) as problems_solved,
+            COALESCE(ap.solved_aptitude, 0) as aptitude_solved,
+            COALESCE(rm.completed_roadmap, 0) as roadmap_completed
         FROM user_period_xp x
+        LEFT JOIN user_all_xp ax ON x.user_id = ax.user_id
         LEFT JOIN user_problems p ON x.user_id = p.user_id
+        LEFT JOIN user_aptitude ap ON x.user_id = ap.user_id
+        LEFT JOIN user_roadmap rm ON x.user_id = rm.user_id
         ORDER BY 
             x.period_xp DESC,
             problems_solved DESC,
+            aptitude_solved DESC,
             x.user_id ASC;
     """
-    cursor.execute(query)
+    cursor.execute(query, tuple(params))
     raw_users = cursor.fetchall()
+
+    # Previous period ranks for weekly / monthly rank delta (only when prior activity exists)
+    prev_rank_map: Dict[int, int] = {}
+    if prev_filter_raw:
+        prev_query = f"""
+            SELECT u.id AS user_id, COALESCE(SUM(t.amount), 0)::int AS prev_xp
+            FROM users u
+            LEFT JOIN xp_transactions t ON u.id = t.user_id {prev_filter_raw}
+            {batch_where_sql}
+            GROUP BY u.id
+            ORDER BY prev_xp DESC, u.id ASC;
+        """
+        cursor.execute(prev_query, tuple(params))
+        prev_rows = cursor.fetchall()
+        if any(r["prev_xp"] > 0 for r in prev_rows):
+            for p_idx, pr in enumerate(prev_rows):
+                if pr["prev_xp"] > 0:
+                    prev_rank_map[pr["user_id"]] = p_idx + 1
 
     # Fetch recent activities for learners
     cursor.execute("""
@@ -406,9 +664,15 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             "created_at": r["created_at"].isoformat() if r["created_at"] else ""
         })
 
-    # Compute real per-user Aptitude average & Mock Interview average from DB
+    # Platform totals from PostgreSQL
     cursor.execute("SELECT COUNT(*) as total_dsa FROM dsa_problems;")
     total_dsa = max(1, (cursor.fetchone() or {}).get("total_dsa", 1) or 1)
+
+    cursor.execute("SELECT COUNT(*) as total_apt FROM aptitude_questions;")
+    total_aptitude = int((cursor.fetchone() or {}).get("total_apt", 0) or 0)
+
+    cursor.execute("SELECT COUNT(*) as total_rm FROM roadmap_topics;")
+    total_roadmap = int((cursor.fetchone() or {}).get("total_rm", 0) or 0)
 
     cursor.execute("""
         SELECT user_id, ROUND(AVG(COALESCE(accuracy, score_percentage))::numeric, 0)::int AS avg_apt
@@ -424,6 +688,7 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
     """)
     mock_avg_map = {r["user_id"]: int(r["avg_mock"] or 0) for r in cursor.fetchall()}
 
+    total_candidates = len(raw_users)
     rankings = []
     current_user_card = None
 
@@ -431,30 +696,34 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
         uid = u["user_id"]
         streak = calculate_streak(uid, cursor)
         readiness = get_user_readiness(uid, cursor)
-        level_info = calculate_level(u["period_xp"])
+        level_info = calculate_level(u["lifetime_xp"])
 
-        # Extract initials for avatar
         name = u["full_name"] or u["email"].split("@")[0]
         parts = name.strip().split()
         initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper() if parts else "ST"
 
-        # Badges list
         badges = []
-        if u["period_xp"] >= 2000:
-            badges.append("DSA Master")
-        elif u["period_xp"] >= 500:
-            badges.append("Consistent Achiever")
+        if u["problems_solved"] >= 1 or u["aptitude_solved"] >= 1:
+            badges.append("First Problem Solved")
         if streak >= 7:
             badges.append("7-Day Streak")
-        elif streak >= 3:
-            badges.append("Active Learner")
-        if u["problems_solved"] >= 20:
-            badges.append("Problem Solver")
-        if not badges and u["period_xp"] > 0:
-            badges.append("Rising Star")
+        if u["problems_solved"] >= 50:
+            badges.append("50 DSA Problems")
+        if readiness >= 75:
+            badges.append("Interview Ready")
+        if u["lifetime_xp"] >= 500 and "Consistent Achiever" not in badges:
+            badges.append("Consistent Achiever")
 
         rank = idx + 1
+        prev_rank = prev_rank_map.get(uid)
+        rank_change = (prev_rank - rank) if prev_rank is not None else None
         is_current = (uid == current_user_id)
+
+        percentile = (
+            100.0
+            if total_candidates <= 1
+            else round(((total_candidates - rank) / (total_candidates - 1)) * 100, 1)
+        )
 
         dsa_metric = min(100, round((u["problems_solved"] / total_dsa) * 100, 1)) if u["problems_solved"] > 0 else 0
         apt_metric = apt_avg_map.get(uid, 0)
@@ -463,19 +732,25 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
         user_item = {
             "id": uid,
             "rank": rank,
-            "rankChange": 0,
+            "rankChange": rank_change,
+            "percentile": percentile,
             "name": name,
             "email": u["email"],
             "username": u["email"].split("@")[0],
             "avatar": initials,
             "avatar_url": u.get("avatar_url") or None,
             "role": u["target_role"] or "Software Engineer Aspirant",
+            "batch": str(u["grad_year"]) if u.get("grad_year") else None,
+            "institution": (u.get("college") or "").strip() or None,
             "xp": u["period_xp"],
+            "total_xp": u["lifetime_xp"],
             "level": level_info["level"],
             "next_level_xp": level_info["next_level_xp"],
             "xp_in_level": level_info["xp_in_level"],
             "progress_percentage": level_info["progress_percentage"],
             "problems": u["problems_solved"],
+            "aptitude_solved": u["aptitude_solved"],
+            "roadmap_completed": u["roadmap_completed"],
             "streak": streak,
             "readiness": readiness,
             "dsa": dsa_metric,
@@ -483,40 +758,53 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
             "interview": interview_metric,
             "badges": badges,
             "recent_activities": user_recent_map.get(uid, []),
-            "is_current_user": is_current
+            "is_current_user": is_current,
         }
 
         rankings.append(user_item)
-
         if is_current:
             current_user_card = user_item
 
-    # If current_user was not in list (edge case), synthesize from user table
+    # Active participants (users with positive activity in selected scope)
+    active_participants = sum(
+        1 for item in rankings if item["xp"] > 0 or item["problems"] > 0 or item["aptitude_solved"] > 0 or item["streak"] > 0
+    )
+
+    # Fallback if logged-in user belongs to a different batch when filtered by batch
     if not current_user_card and current_user_id:
-        cursor.execute("SELECT id, full_name, email, target_role, avatar_url FROM users WHERE id = %s;", (current_user_id,))
+        cursor.execute(
+            "SELECT id, full_name, email, target_role, grad_year, college, avatar_url, COALESCE(total_xp, 0) AS total_xp FROM users WHERE id = %s;",
+            (current_user_id,),
+        )
         u = cursor.fetchone()
         if u:
             streak = calculate_streak(current_user_id, cursor)
             readiness = get_user_readiness(current_user_id, cursor)
-            level_info = calculate_level(0)
+            level_info = calculate_level(u["total_xp"])
             parts = (u["full_name"] or "").strip().split()
             initials = (parts[0][0] + (parts[-1][0] if len(parts) > 1 else "")).upper() if parts else "ME"
             current_user_card = {
                 "id": u["id"],
                 "rank": len(rankings) + 1,
-                "rankChange": 0,
+                "rankChange": None,
+                "percentile": 0.0,
                 "name": u["full_name"] or "You",
                 "email": u["email"],
                 "username": u["email"].split("@")[0],
                 "avatar": initials,
                 "avatar_url": u.get("avatar_url") or None,
                 "role": u["target_role"] or "Software Engineer Aspirant",
-                "xp": 0,
+                "batch": str(u["grad_year"]) if u.get("grad_year") else None,
+                "institution": (u.get("college") or "").strip() or None,
+                "xp": u["total_xp"],
+                "total_xp": u["total_xp"],
                 "level": level_info["level"],
                 "next_level_xp": level_info["next_level_xp"],
                 "xp_in_level": level_info["xp_in_level"],
                 "progress_percentage": level_info["progress_percentage"],
                 "problems": 0,
+                "aptitude_solved": 0,
+                "roadmap_completed": 0,
                 "streak": streak,
                 "readiness": readiness,
                 "dsa": 0,
@@ -524,24 +812,65 @@ def get_leaderboard_data(period: str = "overall", current_user_id: int = 1, curs
                 "interview": mock_avg_map.get(current_user_id, 0),
                 "badges": [],
                 "recent_activities": user_recent_map.get(current_user_id, []),
-                "is_current_user": True
+                "is_current_user": True,
             }
 
-    # Top 3 performers
-    top_three = rankings[:3]
+    # Count full roadmap domains completed for current user
+    domains_completed = 0
+    if current_user_id:
+        try:
+            cursor.execute("""
+                SELECT COUNT(*)::int AS dc FROM (
+                    SELECT d.id
+                    FROM roadmap_domains d
+                    JOIN roadmap_topics t ON t.domain_id = d.id
+                    LEFT JOIN user_roadmap_progress urp ON urp.topic_id = t.id AND urp.user_id = %s AND urp.status = 'completed'
+                    GROUP BY d.id
+                    HAVING COUNT(t.id) > 0 AND COUNT(t.id) = COUNT(urp.topic_id)
+                ) sub;
+            """, (current_user_id,))
+            dc_row = cursor.fetchone()
+            domains_completed = int(dc_row["dc"] if dc_row else 0)
+        except Exception:
+            domains_completed = 0
 
-    # XP Performance (highest XP for proportional bar calculation)
+    achievements = _sync_and_get_achievements(
+        user_id=current_user_id,
+        dsa_solved=(current_user_card or {}).get("problems", 0),
+        apt_solved=(current_user_card or {}).get("aptitude_solved", 0),
+        streak=(current_user_card or {}).get("streak", 0),
+        readiness=(current_user_card or {}).get("readiness", 0),
+        domains_completed=domains_completed,
+        cursor=cursor,
+    )
+    rank_history = _compute_real_rank_history(current_user_id, cursor) if current_user_id else []
+
+    top_three = rankings[:3]
     highest_xp = rankings[0]["xp"] if rankings and rankings[0]["xp"] > 0 else 100
 
     return {
         "period": period_lower,
-        "total_learners": len(rankings),
+        "period_info": {
+            "label": period_label,
+            "timezone": "UTC",
+        },
+        "batch": batch_clean,
+        "available_batches": available_batches,
+        "total_learners": total_candidates,
+        "active_participants": active_participants,
         "current_user": current_user_card,
         "top_three": top_three,
         "rankings": rankings,
         "highest_xp": highest_xp,
+        "totals": {
+            "dsa_total": int(total_dsa),
+            "aptitude_total": int(total_aptitude),
+            "roadmap_total": int(total_roadmap),
+        },
+        "achievements": achievements,
+        "rank_history": rank_history,
         "xp_rules": XP_DISPLAY_RULES,
-        "updated_at": datetime.utcnow().isoformat()
+        "updated_at": datetime.utcnow().isoformat(),
     }
 
 
