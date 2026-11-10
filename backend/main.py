@@ -8,8 +8,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
+import psycopg2
 
 from auth import (
     create_access_token,
@@ -313,10 +314,9 @@ def register_user(user_data: UserRegister, origin: Optional[str] = Header(None))
 # -------------------------------------------------------------
 
 AVATAR_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "avatars"
-AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 ALLOWED_AVATAR_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-SAFE_AVATAR_FILENAME_RE = re.compile(r"^avatar_\d+_[a-f0-9]+\.(jpg|jpeg|png|webp)$")
+SAFE_AVATAR_FILENAME_RE = re.compile(r"^avatar_(\d+)_[a-f0-9]+\.(jpg|jpeg|png|webp)$")
 
 USER_PROFILE_SELECT_COLS = """
     id, email, full_name, plan, credits, phone, bio, career_objective, location,
@@ -377,9 +377,9 @@ def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
         neon_user = neon_data.get("user")
     else:
         # Check if user is in public.users with legacy hash (auto-migration to Neon Auth)
-        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        cursor.execute("SELECT id, full_name, hashed_password FROM users WHERE email = %s", (email,))
         legacy_row = cursor.fetchone()
-        if legacy_row and verify_password(user_data.password, legacy_row.get("hashed_password", "")):
+        if legacy_row and verify_password(user_data.password, legacy_row.get("hashed_password") or ""):
             full_name = legacy_row.get("full_name") or "PrepNest Student"
             neon_auth_sign_up(full_name, email, user_data.password, origin=req_origin)
             succ, sdata, _ = neon_auth_sign_in(email, user_data.password, origin=req_origin)
@@ -396,15 +396,15 @@ def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
 
     # 2. Ensure user exists in public.users
     try:
-        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        cursor.execute(f"SELECT {USER_PROFILE_SELECT_COLS} FROM users WHERE email = %s", (email,))
         user_row = cursor.fetchone()
         if not user_row:
             name = neon_user.get("name") if neon_user else "PrepNest User"
             hashed = hash_password(user_data.password)
-            cursor.execute("""
+            cursor.execute(f"""
                 INSERT INTO users (email, full_name, hashed_password, plan, credits)
                 VALUES (%s, %s, %s, 'Pro', 250)
-                RETURNING *;
+                RETURNING {USER_PROFILE_SELECT_COLS};
             """, (email, name, hashed))
             user_row = cursor.fetchone()
             conn.commit()
@@ -414,6 +414,8 @@ def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
 
     user = dict(user_row)
     user.pop("hashed_password", None)
+    user.pop("avatar_data", None)
+    user.pop("avatar_mime", None)
     if user.get("created_at"):
         user["created_at"] = str(user["created_at"])
 
@@ -429,10 +431,9 @@ def login_user(user_data: UserLogin, origin: Optional[str] = Header(None)):
 # -------------------------------------------------------------
 
 AVATAR_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "avatars"
-AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 ALLOWED_AVATAR_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-SAFE_AVATAR_FILENAME_RE = re.compile(r"^avatar_\d+_[a-f0-9]+\.(jpg|jpeg|png|webp)$")
+SAFE_AVATAR_FILENAME_RE = re.compile(r"^avatar_(\d+)_[a-f0-9]+\.(jpg|jpeg|png|webp)$")
 
 USER_PROFILE_SELECT_COLS = """
     id, email, full_name, plan, credits, phone, bio, career_objective, location,
@@ -675,13 +676,8 @@ async def upload_user_avatar(
             detail="Invalid image content. Only valid JPG, JPEG, PNG, or WebP images are allowed.",
         )
 
-    safe_ext, _mime = detected
+    safe_ext, mime_type = detected
     filename = f"avatar_{user_id}_{secrets.token_hex(12)}.{safe_ext}"
-    dest_path = (AVATAR_UPLOAD_DIR / filename).resolve()
-    if dest_path.parent != AVATAR_UPLOAD_DIR.resolve():
-        raise HTTPException(status_code=400, detail="Invalid upload path.")
-
-    dest_path.write_bytes(raw_bytes)
     new_avatar_url = f"/api/media/avatars/{filename}"
     old_avatar_url = current_user.get("avatar_url")
 
@@ -691,19 +687,19 @@ async def upload_user_avatar(
         cursor.execute(
             f"""
             UPDATE users
-            SET avatar_url = %s
+            SET avatar_url = %s,
+                avatar_data = %s,
+                avatar_mime = %s
             WHERE id = %s
             RETURNING {USER_PROFILE_SELECT_COLS};
             """,
-            (new_avatar_url, user_id),
+            (new_avatar_url, psycopg2.Binary(raw_bytes), mime_type, user_id),
         )
         updated_row = cursor.fetchone()
         conn.commit()
     except Exception as e:
         conn.rollback()
-        if dest_path.is_file():
-            dest_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Failed to save avatar URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save avatar in database: {str(e)}")
     finally:
         cursor.close()
         conn.close()
@@ -733,7 +729,9 @@ def delete_user_avatar(authorization: Optional[str] = Header(None)):
         cursor.execute(
             f"""
             UPDATE users
-            SET avatar_url = NULL
+            SET avatar_url = NULL,
+                avatar_data = NULL,
+                avatar_mime = NULL
             WHERE id = %s
             RETURNING {USER_PROFILE_SELECT_COLS};
             """,
@@ -763,22 +761,42 @@ def delete_user_avatar(authorization: Optional[str] = Header(None)):
 
 @app.get("/api/media/avatars/{filename}")
 def get_user_avatar_file(filename: str):
-    if not SAFE_AVATAR_FILENAME_RE.match(filename):
-        raise HTTPException(status_code=404, detail="Avatar not found")
-    file_path = (AVATAR_UPLOAD_DIR / filename).resolve()
-    if file_path.parent != AVATAR_UPLOAD_DIR.resolve() or not file_path.is_file():
+    match = SAFE_AVATAR_FILENAME_RE.match(filename)
+    if not match:
         raise HTTPException(status_code=404, detail="Avatar not found")
 
-    ext = file_path.suffix.lower()
+    user_id = int(match.group(1))
+    expected_url = f"/api/media/avatars/{filename}"
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT avatar_data, avatar_mime
+            FROM users
+            WHERE id = %s AND avatar_url = %s;
+            """,
+            (user_id, expected_url),
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+        conn.close()
+
+    if not row or not row.get("avatar_data"):
+        raise HTTPException(status_code=404, detail="Avatar not found")
+
+    ext = Path(filename).suffix.lower()
     media_map = {
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".png": "image/png",
         ".webp": "image/webp",
     }
-    media_type = media_map.get(ext, "application/octet-stream")
-    return FileResponse(
-        path=str(file_path),
+    media_type = row.get("avatar_mime") or media_map.get(ext, "application/octet-stream")
+    return Response(
+        content=bytes(row["avatar_data"]),
         media_type=media_type,
         headers={
             "X-Content-Type-Options": "nosniff",

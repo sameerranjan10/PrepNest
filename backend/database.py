@@ -443,6 +443,8 @@ def init_db():
             preferred_difficulty TEXT DEFAULT 'Medium',
             streak_reminders BOOLEAN DEFAULT TRUE,
             weekly_digest BOOLEAN DEFAULT TRUE,
+            avatar_data BYTEA,
+            avatar_mime TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
     """)
@@ -453,6 +455,8 @@ def init_db():
         ("bio", "TEXT"),
         ("location", "TEXT"),
         ("avatar_url", "TEXT"),
+        ("avatar_data", "BYTEA"),
+        ("avatar_mime", "TEXT"),
         ("target_role", "TEXT"),
         ("target_companies", "TEXT"),
         ("skills", "TEXT"),
@@ -495,6 +499,39 @@ def init_db():
             cursor.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
         except Exception:
             pass
+
+    # Backfill any previously local-disk avatar files into PostgreSQL BYTEA
+    try:
+        cursor.execute("""
+            SELECT id, avatar_url
+            FROM users
+            WHERE avatar_url LIKE '/api/media/avatars/%%'
+              AND avatar_data IS NULL;
+        """)
+        avatar_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "avatars")
+        mime_map = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }
+        for u_row in cursor.fetchall():
+            fname = (u_row["avatar_url"] or "").replace("/api/media/avatars/", "").split("?")[0].strip()
+            if not fname or "/" in fname or "\\" in fname or ".." in fname:
+                continue
+            fpath = os.path.join(avatar_dir, fname)
+            if os.path.isfile(fpath):
+                ext = os.path.splitext(fname)[1].lower()
+                mime = mime_map.get(ext, "image/webp")
+                with open(fpath, "rb") as af:
+                    raw = af.read()
+                if raw:
+                    cursor.execute(
+                        "UPDATE users SET avatar_data = %s, avatar_mime = %s WHERE id = %s;",
+                        (psycopg2.Binary(raw), mime, u_row["id"]),
+                    )
+    except Exception:
+        pass
 
     
     # 2. Aptitude Questions table
