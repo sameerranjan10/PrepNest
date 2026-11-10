@@ -600,7 +600,7 @@ export default function SettingsPage() {
               {/* Settings Categories Navigation */}
               <nav
                 aria-label="Settings sections"
-                className="bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] rounded-2xl p-2 shadow-sm space-y-1"
+                className="bg-white dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] rounded-2xl p-2 shadow-sm flex flex-row lg:flex-col gap-1.5 lg:gap-1 overflow-x-auto lg:overflow-visible"
               >
                 {NAV_TABS.map((tab) => {
                   const Icon = tab.icon;
@@ -610,7 +610,7 @@ export default function SettingsPage() {
                       key={tab.id}
                       type="button"
                       onClick={() => setActiveTab(tab.id)}
-                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
+                      className={`shrink-0 lg:shrink lg:w-full flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold transition text-left cursor-pointer whitespace-nowrap ${
                         isActive
                           ? 'bg-[#FFF8EE] dark:bg-[#FFA116]/15 text-[#D97706] dark:text-[#FFA116] border border-[#F59E0B]/30 shadow-xs'
                           : 'text-[#64748B] hover:text-[#1E293B] dark:hover:text-[#E6EDF3] hover:bg-[#F8FAFC] dark:hover:bg-[#21262D] border border-transparent'
@@ -618,13 +618,13 @@ export default function SettingsPage() {
                     >
                       <span className="flex items-center gap-2.5">
                         <Icon
-                          className={`w-4 h-4 ${
+                          className={`w-4 h-4 shrink-0 ${
                             isActive ? 'text-[#F59E0B]' : 'text-[#64748B]'
                           }`}
                         />
                         <span>{tab.label}</span>
                       </span>
-                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />}
+                      {isActive && <span className="hidden lg:inline-block w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />}
                     </button>
                   );
                 })}

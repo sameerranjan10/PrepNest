@@ -86,6 +86,21 @@ export const Sidebar = ({ activeRoute = 'dashboard', hiddenOnDesktop }) => {
     };
   }, [isExternallyControlled]);
 
+  // Lock background scroll and support Escape key while mobile navigation drawer is open
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mobileOpen]);
+
   useEffect(() => {
     if (!isExternallyControlled) {
       try {
@@ -189,8 +204,10 @@ export const Sidebar = ({ activeRoute = 'dashboard', hiddenOnDesktop }) => {
 
         {/* Mobile close button */}
         <button
+          type="button"
           onClick={() => setMobileOpen(false)}
-          className="md:hidden p-1.5 rounded-lg text-[#64748B] hover:text-[#262626] hover:bg-white/70 transition cursor-pointer"
+          aria-label="Close navigation menu"
+          className="md:hidden w-11 h-11 inline-flex items-center justify-center rounded-xl text-[#64748B] hover:text-[#262626] hover:bg-white/70 transition cursor-pointer shrink-0"
         >
           <X className="w-5 h-5" />
         </button>
@@ -231,7 +248,11 @@ export const Sidebar = ({ activeRoute = 'dashboard', hiddenOnDesktop }) => {
               }}
               onMouseLeave={() => mini && setHoveredItem(null)}
               className={`group relative flex items-center rounded-xl text-[13px] font-medium border transition-all duration-150 ${
-                mini ? 'justify-center p-1.5' : 'justify-between px-2.5 py-2'
+                mini
+                  ? 'justify-center p-1.5'
+                  : isFloatingDesktop
+                  ? 'justify-between px-2.5 py-2'
+                  : 'justify-between px-3 py-2.5 min-h-[44px]'
               } ${
                 isActive
                   ? 'bg-gradient-to-r from-[#FFF8EE]/95 via-[#FFF8EE]/75 to-white/70 dark:bg-none dark:bg-[#FFA116]/12 backdrop-blur-md border-[#FFA116]/35 text-[#E68F0F] dark:text-[#FFA116] font-semibold shadow-[0_3px_12px_-3px_rgba(255,161,22,0.22),inset_0_1px_0_rgba(255,255,255,0.9)] dark:shadow-none'
@@ -325,11 +346,15 @@ export const Sidebar = ({ activeRoute = 'dashboard', hiddenOnDesktop }) => {
               </p>
             </div>
             <button
+              type="button"
               onClick={handleLogout}
               title="Sign Out"
-              className="p-1.5 rounded-lg text-[#64748B] hover:text-[#DC2626] hover:bg-[#FEF2F2]/90 transition cursor-pointer shrink-0"
+              aria-label="Sign Out"
+              className={`rounded-lg text-[#64748B] hover:text-[#DC2626] hover:bg-[#FEF2F2]/90 transition cursor-pointer shrink-0 ${
+                isFloatingDesktop ? 'p-1.5' : 'w-10 h-10 inline-flex items-center justify-center'
+              }`}
             >
-              <LogOut className="w-3.5 h-3.5" />
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         )}

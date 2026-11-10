@@ -266,7 +266,116 @@ export default function LeaderboardPage() {
 
               {/* Main Ranking Table */}
               <section className="rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] shadow-xs overflow-hidden">
-                <div className="overflow-x-auto">
+                {/* Mobile Candidate Cards */}
+                <div className="md:hidden divide-y divide-[#E2E8F0] dark:divide-[#21262D]">
+                  {rankedUsers.length === 0 ? (
+                    <div className="py-10 px-4 text-center text-xs text-[#64748B]">
+                      No candidates match your search criteria.
+                    </div>
+                  ) : (
+                    rankedUsers.map((u, idx) => {
+                      const isSelf = Boolean(u.is_current_user);
+                      const displayRank = sortBy === "xp" && !search.trim() ? u.rank : idx + 1;
+                      const avatarSrc = isSelf ? user?.avatar_url || u.avatar_url : u.avatar_url;
+                      const xpWidth = Math.max(
+                        u.xp > 0 ? 6 : 0,
+                        Math.min(100, Math.round((Number(u.xp || 0) / highestXp) * 100))
+                      );
+
+                      return (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => setSelectedUser(u)}
+                          className={`w-full text-left p-4 space-y-3 transition cursor-pointer ${
+                            isSelf
+                              ? "bg-[#FFFBEB] dark:bg-[#F59E0B]/10"
+                              : "hover:bg-[#F8FAFC] dark:hover:bg-[#21262D]/70"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-8 shrink-0 flex flex-col items-center justify-center font-bold tabular-nums text-xs">
+                                {displayRank === 1 ? (
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#F59E0B] text-white text-[11px]">
+                                    1
+                                  </span>
+                                ) : displayRank === 2 ? (
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#94A3B8] text-white text-[11px]">
+                                    2
+                                  </span>
+                                ) : displayRank === 3 ? (
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#B45309] text-white text-[11px]">
+                                    3
+                                  </span>
+                                ) : (
+                                  <span className={isSelf ? "text-[#F59E0B]" : "text-[#64748B]"}>
+                                    #{displayRank}
+                                  </span>
+                                )}
+                              </div>
+                              <UserAvatar
+                                src={avatarSrc}
+                                name={u.name}
+                                initials={u.avatar}
+                                size="sm"
+                                className={isSelf ? "ring-2 ring-[#F59E0B]/60 shrink-0" : "shrink-0"}
+                              />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-sm text-[#1E293B] dark:text-[#E6EDF3] truncate">
+                                    {u.name}
+                                  </span>
+                                  {isSelf && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-[#F59E0B] text-white text-[9px] font-bold shrink-0">
+                                      YOU
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-[#64748B] dark:text-[#8B949E] truncate">
+                                  {u.role}
+                                  {u.batch ? ` · Batch ${u.batch}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="font-bold text-xs text-[#F59E0B] tabular-nums shrink-0 inline-flex items-center gap-1">
+                              <Flame className="w-3.5 h-3.5 fill-[#F59E0B]" />
+                              {u.streak ?? 0}d
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 text-xs bg-[#F8FAFC] dark:bg-[#0D1117]/60 rounded-xl p-2.5 border border-[#E2E8F0]/70 dark:border-[#30363D]">
+                            <div>
+                              <span className="text-[10px] uppercase text-[#64748B] block">XP</span>
+                              <span className="font-bold text-[#1E293B] dark:text-[#E6EDF3] tabular-nums">
+                                {Number(u.xp || 0).toLocaleString()}
+                              </span>
+                              <div className="h-1 mt-1 rounded-full bg-[#E2E8F0] dark:bg-[#21262D] overflow-hidden">
+                                <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${xpWidth}%` }} />
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-[10px] uppercase text-[#64748B] block">DSA / Apt</span>
+                              <span className="font-bold text-[#1E293B] dark:text-[#E6EDF3] tabular-nums">
+                                {u.problems ?? 0} / {u.aptitude_solved ?? 0}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[10px] uppercase text-[#64748B] block">Ready</span>
+                              <span className="font-bold text-[#16A34A] tabular-nums">{u.readiness ?? 0}%</span>
+                              <div className="h-1 mt-1 rounded-full bg-[#E2E8F0] dark:bg-[#21262D] overflow-hidden">
+                                <div className="bg-[#16A34A] h-full rounded-full" style={{ width: `${u.readiness ?? 0}%` }} />
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Desktop Ranking Table */}
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-[#E2E8F0] dark:border-[#30363D] bg-[#F8FAFC] dark:bg-[#0D1117]/75 text-[11px] text-[#64748B] dark:text-[#8B949E] uppercase tracking-wider font-semibold">
@@ -451,11 +560,11 @@ export default function LeaderboardPage() {
       {/* Candidate Public Profile Modal */}
       {selectedUser && (
         <div
-          className="fixed inset-0 z-50 bg-[#0F172A]/50 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-[#0F172A]/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] p-6 space-y-5 shadow-2xl">
+          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl bg-[#FFFFFF] dark:bg-[#161B22] border border-[#E2E8F0] dark:border-[#30363D] p-4 sm:p-6 space-y-5 shadow-2xl">
             <div className="flex items-start justify-between border-b border-[#E2E8F0] dark:border-[#30363D] pb-3.5">
               <div className="flex items-center gap-3 min-w-0">
                 <UserAvatar

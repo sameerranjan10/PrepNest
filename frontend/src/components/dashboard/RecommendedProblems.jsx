@@ -75,8 +75,64 @@ export function RecommendedProblems({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <>
+          {/* Mobile Problem Cards */}
+          <div className="sm:hidden divide-y divide-[#F1F3F5]">
+            {problems.map((prob) => {
+              const topicLabel = formatTopics(prob.topics, prob.category);
+              const acceptance = prob.acceptance_rate ?? prob.acceptanceRate ?? 0;
+              const companyList = extractCompanyChips(prob.companies);
+              const isSolved = Boolean(prob.is_solved ?? prob.solved);
+
+              return (
+                <div key={prob.id} className="p-3.5 space-y-2.5 hover:bg-[#F7F8FA]/80 transition-colors">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link
+                      to={`/dsa?search=${encodeURIComponent(prob.title)}`}
+                      className="font-medium text-sm text-[#262626] hover:text-[#FFA116] transition-colors flex items-center gap-1.5 min-w-0"
+                    >
+                      {isSolved && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A] shrink-0" title="Solved" />
+                      )}
+                      <span className="truncate">{prob.title}</span>
+                    </Link>
+                    <DifficultyBadge difficulty={prob.difficulty} size="xs" />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#64748B]">
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                      <span className="truncate max-w-[160px]">{topicLabel}</span>
+                      <span>·</span>
+                      <span className="tabular-nums">{acceptance}%</span>
+                    </div>
+                    <Link
+                      to={`/dsa?search=${encodeURIComponent(prob.title)}`}
+                      className="inline-flex items-center justify-center text-xs font-semibold px-3 py-1.5 min-h-[36px] rounded-md border border-[#E5E7EB] bg-[#FFFFFF] hover:border-[#FFA116] hover:text-[#FFA116] text-[#262626] transition-colors shrink-0"
+                    >
+                      Solve
+                    </Link>
+                  </div>
+
+                  {companyList.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {companyList.map((comp, idx) => (
+                        <span
+                          key={idx}
+                          className="text-[11px] bg-[#F7F8FA] text-[#64748B] px-1.5 py-0.5 rounded border border-[#E5E7EB]"
+                        >
+                          {comp}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[#F7F8FA] border-b border-[#E5E7EB] text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
                 <th className="py-2.5 pl-4 pr-2">Problem</th>
@@ -154,6 +210,7 @@ export function RecommendedProblems({
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );

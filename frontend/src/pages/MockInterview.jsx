@@ -668,7 +668,7 @@ export default function MockInterviewPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header defaultCollapsed />
 
-        <BlurDrop as="main" className="p-6 md:p-8 space-y-6 overflow-y-auto">
+        <BlurDrop as="main" className="p-4 sm:p-6 md:p-8 space-y-6 overflow-y-auto">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:pr-[124px] lg:pr-[132px]">
             <div>
@@ -772,7 +772,7 @@ export default function MockInterviewPage() {
                           AI
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                             <h3 className="text-xs font-bold text-[#1E293B] dark:text-[#E6EDF3] truncate">
                               {session.company_name ? `${session.company_name} ` : ""}AI Interviewer
                             </h3>
@@ -800,7 +800,7 @@ export default function MockInterviewPage() {
                         <button
                           type="button"
                           onClick={toggleCamera}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg border text-xs font-semibold transition cursor-pointer ${
                             cameraActive
                               ? "bg-[#F0FDF4] dark:bg-[#16A34A]/15 border-[#16A34A]/25 text-[#16A34A] dark:text-[#3FB950]"
                               : "bg-[#FFFFFF] dark:bg-[#21262D] border-[#E2E8F0] dark:border-[#30363D] text-[#64748B]"
@@ -813,7 +813,7 @@ export default function MockInterviewPage() {
                         <button
                           type="button"
                           onClick={toggleMic}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg border text-xs font-semibold transition cursor-pointer ${
                             isAnswering
                               ? "bg-[#FEF2F2] dark:bg-[#F85149]/15 border-[#DC2626]/30 text-[#DC2626]"
                               : micActive

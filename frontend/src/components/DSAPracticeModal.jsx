@@ -245,14 +245,16 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
   if (!problemId) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-2 sm:p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150">
       <div 
-        className={`bg-white border border-[#E5E7EB] rounded-xl flex flex-col shadow-2xl overflow-hidden transition-all duration-200 ${
-          isFullscreen ? 'w-full h-full rounded-none border-none' : 'w-full max-w-7xl h-[92vh]'
+        className={`bg-white border border-[#E5E7EB] flex flex-col shadow-2xl overflow-hidden transition-all duration-200 ${
+          isFullscreen
+            ? 'w-full h-[100dvh] rounded-none border-none'
+            : 'w-full max-w-7xl h-[100dvh] sm:h-[92dvh] rounded-none sm:rounded-xl'
         }`}
       >
         {/* Header Bar */}
-        <div className="px-5 py-3 bg-[#F7F8FA] border-b border-[#E5E7EB] flex items-center justify-between gap-4 shrink-0">
+        <div className="px-3 sm:px-5 py-2.5 sm:py-3 bg-[#F7F8FA] border-b border-[#E5E7EB] flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             {problem && (
               <>
@@ -277,7 +279,7 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
                 </button>
 
                 <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                  <span className="text-sm sm:text-base font-bold text-[#262626] truncate max-w-md">
+                  <span className="text-sm sm:text-base font-bold text-[#262626] truncate max-w-[13rem] sm:max-w-md">
                     {problem.id}. {problem.title}
                   </span>
                   <DifficultyBadge difficulty={problem.difficulty} size="xs" />
@@ -341,7 +343,7 @@ export default function DSAPracticeModal({ problemId, onClose, onProblemUpdated 
             <ComponentLoader size="sm" message="Loading problem details..." />
           </div>
         ) : (
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E5E7EB] overflow-hidden">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E5E7EB] overflow-y-auto lg:overflow-hidden">
             {/* LEFT PANEL: PROBLEM STATEMENT, VERIFIED SOLUTIONS, HINTS */}
             <div className="flex flex-col h-full overflow-hidden bg-white">
               {/* Left Sub-Tabs Header */}
